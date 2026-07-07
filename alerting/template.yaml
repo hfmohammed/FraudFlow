@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "FraudFlow alerting — EventBridge custom bus + Lambda + SES email"
+
+Parameters:
+  SenderEmail:
+    Type: String
+    Description: "SES-verified sender address (must be verified in SES console)"
+  RecipientEmail:
+    Type: String
+    Description: "SES-verified recipient address (must be verified while in SES sandbox)"
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.12
+
+Resources:
+
+  # ── 1. Custom Event Bus ────────────────────────────────────────────────────
+  # A dedicated bus isolates our events from the default bus (which only receives
+  # AWS service events). All put-events calls from the Spark gold job or CLI must
+  # include EventBusName: FraudflowBus, otherwise events silently go to the default
+  # bus and the routing rule never matches.
+  FraudflowBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: FraudflowBus
+
+  # ── 2. Routing Rule ────────────────────────────────────────────────────────
+  # Pattern matching is case-sensitive. "FraudDetected" ≠ "fraudDetected".
+  # The rule must reference the custom bus explicitly; omitting EventBusName
+  # defaults to the default bus and the rule never fires.
+  FraudDetectedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: FraudDetectedRule
+      EventBusName: !Ref FraudflowBus
+      EventPattern:
+        source:
+          - "fraudflow.gold"
+        detail-type:
+          - "FraudDetected"
+      State: ENABLED
+      Targets:
+        - Id: FraudAlertLambdaTarget
+          Arn: !GetAtt FraudAlertFunction.Arn
+
+  # ── 3. Lambda Function ─────────────────────────────────────────────────────
+  # No `Events:` shorthand here — SAM's EventBridge shorthand only creates rules
+  # on the *default* bus. We use a custom bus, so the rule and permission are
+  # wired manually (Resources 2 and 4).
+  #
+  # AWS_REGION_OVERRIDE instead of AWS_REGION: "AWS_REGION" is a Lambda reserved
+  # environment variable. CloudFormation refuses to deploy if you set it explicitly.
+  FraudAlertFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: FraudAlertFunction
+      CodeUri: fraud_alert/
+      Handler: handler.lambda_handler
+      Role: !GetAtt FraudAlertRole.Arn
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmail
+          RECIPIENT_EMAIL: !Ref RecipientEmail
+          AWS_REGION_OVERRIDE: !Ref AWS::Region
+
+  # ── 4. Lambda Resource Policy ──────────────────────────────────────────────
+  # Grants EventBridge permission to invoke the Lambda. Without this resource,
+  # EventBridge silently drops matched events — no error anywhere, Lambda never runs.
+  # SourceArn scopes the grant to this specific rule (least-privilege).
+  FraudAlertFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt FraudAlertFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt FraudDetectedRule.Arn
+
+  # ── 5. IAM Execution Role ──────────────────────────────────────────────────
+  FraudAlertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: FraudAlertLambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      # AWSLambdaBasicExecutionRole grants logs:CreateLogGroup/Stream/PutLogEvents.
+      # Without it, CloudWatch logging fails silently.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SESSendEmailPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: "*"
+
+Outputs:
+  FraudAlertFunctionArn:
+    Value: !GetAtt FraudAlertFunction.Arn
+    Description: "Lambda function ARN"
+  FraudflowBusArn:
+    Value: !GetAtt FraudflowBus.Arn
+    Description: "EventBridge custom bus ARN"
+  FraudflowBusName:
+    Value: !Ref FraudflowBus
+    Description: "Use this as EventBusName in put-events calls and the Spark publisher"

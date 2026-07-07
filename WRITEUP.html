@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>FraudFlow Technical Writeup</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="data:text/css,body{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f2f2f2}code{background:#f4f4f4;padding:2px 4px;border-radius:3px}pre{background:#f4f4f4;padding:16px;border-radius:6px;overflow-x:auto}" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">FraudFlow Technical Writeup</h1>
+</header>
+<h1 id="fraudflow-technical-writeup">FraudFlow — Technical Writeup</h1>
+<p><strong>What it is:</strong> A real-time payments fraud detection
+pipeline built from scratch as a data engineering portfolio project.
+Simulated card transactions flow through Kafka into a PySpark Structured
+Streaming medallion architecture (bronze → silver → gold Delta tables),
+with fraud signals computed per card, alerting via AWS Lambda +
+EventBridge + SES, and monitoring via Prometheus + Grafana. The full
+pipeline also runs on Databricks Free Edition.</p>
+<hr />
+<h2 id="problem-statement">1. Problem Statement</h2>
+<p>Card fraud detection is one of the canonical problems in streaming
+data engineering. The challenge is not detection accuracy (that’s an ML
+problem) but <em>pipeline design</em>: how do you process millions of
+events per day, deduplicate them reliably, compute per-card aggregations
+in near real-time, and fire alerts within seconds — all without losing
+data or duplicating alerts?</p>
+<p>This project builds the data engineering layer of that system. The
+fraud scoring is intentionally rule-based (z-scores, velocity counts,
+geo distance) rather than ML-based so the architecture remains the
+focus.</p>
+<hr />
+<h2 id="architecture-overview">2. Architecture Overview</h2>
+<pre><code>Python Producer
+    │  JSON events (1k–50k/min)
+    ▼
+Kafka (KRaft, no Zookeeper)
+    │
+    ▼
+PySpark Structured Streaming
+    ├── Bronze  →  raw, immutable, append-only Delta table
+    ├── Silver  →  deduplicated + validated
+    └── Gold    →  per-card fraud signals + fraud_score
+                       │
+                       ▼
+              AWS EventBridge (FraudflowBus)
+                       │
+                       ▼
+              Lambda → SES email alert
+
+Prometheus ← producer /metrics
+Grafana    ← Prometheus</code></pre>
+<p>The same silver and gold logic runs on Databricks Free Edition —
+replacing Kafka with a self-contained data generator notebook, and
+swapping <code>processingTime</code> triggers for
+<code>availableNow</code>.</p>
+<hr />
+<h2 id="technology-decisions">3. Technology Decisions</h2>
+<h3 id="kafka-over-alternatives">3.1 Kafka over alternatives</h3>
+<p>Kafka was chosen over RabbitMQ, Redis Streams, or a simple database
+queue for three reasons:</p>
+<ol type="1">
+<li><strong>Industry standard for streaming pipelines.</strong> Real
+payments systems (Stripe, Square, Adyen) use Kafka or Kafka-compatible
+systems. Portfolio credibility matters.</li>
+<li><strong>Consumer group semantics.</strong> Multiple Spark jobs
+(bronze, silver, gold) can each maintain their own committed offset
+independently. With a queue like RabbitMQ, a message is consumed once —
+you can’t have three independent consumers at different positions.</li>
+<li><strong>Spark Structured Streaming has native Kafka
+integration.</strong> <code>spark.readStream.format("kafka")</code> is a
+first-class connector with checkpointing built in.</li>
+</ol>
+<h3 id="kraft-mode-no-zookeeper">3.2 KRaft mode (no Zookeeper)</h3>
+<p>Kafka has supported running without Zookeeper since 3.3
+(production-ready). The decision to use KRaft:</p>
+<ul>
+<li><strong>One fewer service.</strong> Zookeeper adds a separate
+container, separate port, and separate failure mode.</li>
+<li><strong>Modern practice.</strong> Zookeeper mode is deprecated as of
+Kafka 3.7 and will be removed in a future release. New projects should
+not use it.</li>
+<li><strong>Simpler mental model.</strong> KRaft means the broker is
+also the controller — no split-brain between broker state and Zookeeper
+state.</li>
+</ul>
+<p>The tradeoff is that the env var setup is more verbose (you must set
+<code>KAFKA_NODE_ID</code>, <code>CLUSTER_ID</code>,
+<code>KAFKA_PROCESS_ROLES</code>, and configure three listeners
+manually). This is worth it.</p>
+<h3 id="confluent-kafka-over-kafka-python">3.3
+<code>confluent-kafka</code> over <code>kafka-python</code></h3>
+<p>Two Python Kafka client libraries exist:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th></th>
+<th>confluent-kafka</th>
+<th>kafka-python</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Under the hood</td>
+<td>librdkafka (C)</td>
+<td>Pure Python</td>
+</tr>
+<tr>
+<td>GIL impact</td>
+<td>Network I/O in C threads, GIL-free</td>
+<td>Every send holds the GIL</td>
+</tr>
+<tr>
+<td>Throughput at 50k events/min</td>
+<td>Fine</td>
+<td>Becomes a bottleneck</td>
+</tr>
+<tr>
+<td>Binary wheel</td>
+<td>Yes (requires glibc, not musl)</td>
+<td>Pure Python, works anywhere</td>
+</tr>
+</tbody>
+</table>
+<p>At 1k events/min the difference is negligible. At 50k events/min, the
+pure Python client becomes the bottleneck. Since this project supports
+up to 50k events/min, <code>confluent-kafka</code> was the right choice.
+The consequence: the Docker base image must be
+<code>python:3.12-slim</code> (Debian/glibc), not Alpine (musl
+libc).</p>
+<h3 id="json-over-avro">3.4 JSON over Avro</h3>
+<p>Avro with a Schema Registry is the production standard for Kafka
+message serialization — it enforces schema evolution, is compact, and
+self-describes. JSON was chosen here because:</p>
+<ol type="1">
+<li><strong>No schema registry to run.</strong> Avro requires Confluent
+Schema Registry as an additional service, adding complexity before the
+interesting parts.</li>
+<li><strong>Human readable.</strong> You can <code>kcat</code> a topic
+and read the events directly.</li>
+<li><strong>Spark reads it with <code>from_json()</code></strong> and an
+explicit StructType — no additional libraries.</li>
+</ol>
+<p>The comment in <code>producer.py</code> notes that production would
+use Avro + Schema Registry. The schema is explicitly defined as a
+StructType in <code>bronze_ingestion.py</code> rather than inferred —
+schema inference on Kafka JSON is unreliable and slow.</p>
+<h3 id="delta-lake-over-parquet">3.5 Delta Lake over Parquet</h3>
+<p>Plain Parquet files would work for batch analytics, but Delta Lake
+adds:</p>
+<ul>
+<li><strong>ACID transactions.</strong> Two Spark jobs writing
+simultaneously won’t corrupt the table.</li>
+<li><strong>Schema enforcement.</strong> Writes that don’t match the
+table schema are rejected.</li>
+<li><strong><code>DESCRIBE HISTORY</code>.</strong> Every write is
+logged — useful for debugging and auditing (demonstrated in
+<code>04_explore.py</code>).</li>
+<li><strong>Streaming source support.</strong>
+<code>spark.readStream.format("delta")</code> lets silver read from
+bronze as a stream without polling hacks.</li>
+<li><strong><code>dropDuplicates</code> with watermarks.</strong> The
+Delta streaming source tracks which versions of the table have been
+read, enabling exactly-once-style deduplication when combined with
+Spark’s watermark mechanism.</li>
+</ul>
+<h3 id="prometheus-grafana-over-other-monitoring">3.6 Prometheus +
+Grafana over other monitoring</h3>
+<p>The producer exposes a <code>/metrics</code> endpoint using
+<code>prometheus_client</code>. Prometheus scrapes it every 15 seconds;
+Grafana visualizes it. This was chosen because:</p>
+<ol type="1">
+<li>The pull model (Prometheus scrapes the producer) works perfectly in
+Docker Compose without any additional configuration inside the producer
+beyond exposing the endpoint.</li>
+<li>Grafana dashboard JSON can be pre-provisioned as a file — no manual
+UI setup required on first boot.</li>
+<li>Prometheus + Grafana is the dominant open-source observability
+stack, appearing in nearly every data engineering interview discussion
+about production monitoring.</li>
+</ol>
+<hr />
+<h2 id="producer-design-decisions">4. Producer Design Decisions</h2>
+<h3 id="dynamic-fraud-rate-controller">4.1 Dynamic fraud rate
+controller</h3>
+<p>Naively randomly injecting fraud at 1.5% would cause the realized
+rate to drift due to the velocity burst pattern (which fires many events
+in a row regardless of the rate). A simple proportional controller was
+implemented in <code>FraudInjector.decide()</code>:</p>
+<pre><code>current_rate = fraud_count / total_count
+adjustment = target * (1 + (target - current_rate) / target)
+injection_probability = clamp(adjustment, 0, 1)</code></pre>
+<p>If the realized rate is below target,
+<code>injection_probability</code> exceeds <code>target</code> to
+compensate. If above, it’s suppressed. Velocity bursts bypass this check
+intentionally — a burst is a single fraud event that happens to generate
+many transactions; stopping it mid-burst would be unrealistic.</p>
+<h3 id="velocity-window-pruning">4.2 Velocity window pruning</h3>
+<p><code>CardProfile.velocity_window</code> stores timestamps of recent
+transactions for a card. This is pruned to the last 60 seconds at the
+<em>start</em> of each call to <code>generate_transaction()</code>, not
+at the end. If pruned at the end, a card that fires a velocity burst
+would accumulate thousands of entries in the window before any are
+pruned. Pruning at the start keeps the list bounded even under burst
+conditions.</p>
+<h3 id="producer.poll0-in-the-main-loop">4.3
+<code>producer.poll(0)</code> in the main loop</h3>
+<p>The <code>confluent-kafka</code> producer is asynchronous —
+<code>produce()</code> enqueues a message, but delivery callbacks
+(<code>on_delivery</code>) only fire when you call <code>poll()</code>.
+This is a common source of bugs: the producer seems to work (no
+exceptions) but delivery errors are silently swallowed.
+<code>poll(0)</code> is called on every loop iteration to drain the
+callback queue without blocking.</p>
+<h3 id="three-listeners-in-kafka">4.4 Three listeners in Kafka</h3>
+<pre><code>PLAINTEXT  :9092  → inter-broker + Spark (inside Docker network)
+CONTROLLER :9093  → KRaft internal only, never advertised
+EXTERNAL   :9094  → host clients (kcat, console consumer, local testing)</code></pre>
+<p>The <code>CONTROLLER</code> listener is deliberately excluded from
+<code>ADVERTISED_LISTENERS</code>. If it’s included, Kafka crashes on
+startup because clients would attempt to connect to the controller port
+for metadata requests, which it doesn’t handle.</p>
+<hr />
+<h2 id="streaming-design-decisions">5. Streaming Design Decisions</h2>
+<h3 id="bronze-raw-and-immutable">5.1 Bronze: raw and immutable</h3>
+<p>Bronze ingests from Kafka with no transformation — only schema
+parsing and adding <code>bronze_ingest_time</code>. The reasoning: if
+silver or gold logic turns out to be wrong, you can always re-derive
+them from bronze. If bronze itself transforms data and the
+transformation was wrong, you’ve lost information. Raw data is the
+source of truth.</p>
+<p><code>startingOffsets="earliest"</code> ensures no events are skipped
+on restart. <code>maxOffsetsPerTrigger=10_000</code> caps how many Kafka
+messages are read per micro-batch, preventing a single batch from
+reading the entire topic backlog on startup.</p>
+<h3 id="silver-why-watermarking-is-necessary-for-deduplication">5.2
+Silver: why watermarking is necessary for deduplication</h3>
+<p><code>dropDuplicates(["transaction_id", "event_time"])</code> sounds
+simple, but in a streaming context Spark has to <em>remember</em> every
+transaction_id it has ever seen to reject future duplicates. Without a
+bound, that state grows forever — a job running for days would
+eventually OOM.</p>
+<p><code>.withWatermark("event_time", "10 minutes")</code> tells Spark:
+“events more than 10 minutes behind the latest event seen can be dropped
+from deduplication state.” This trades a small amount of correctness
+(very late duplicates will slip through) for bounded memory. In a
+payments system, a duplicate arriving more than 10 minutes late would be
+rejected by the downstream idempotency layer anyway.</p>
+<p>The watermark must be applied <em>before</em>
+<code>dropDuplicates</code>, and the watermark column must be included
+in the <code>dropDuplicates</code> key — Spark requires this to
+correctly bound the state.</p>
+<h3 id="gold-foreachbatch-instead-of-native-streaming-aggregations">5.3
+Gold: <code>foreachBatch</code> instead of native streaming
+aggregations</h3>
+<p>The gold layer needs to: (1) compute per-card statistics, (2) join
+those statistics back to individual transactions, and (3) optionally
+call the AWS EventBridge API from the driver. None of this fits the
+native <code>groupBy().agg()</code> streaming model cleanly.</p>
+<p><code>foreachBatch</code> gives you the full batch DataFrame API
+inside each micro-batch. The tradeoff: you lose Spark’s built-in state
+management for windowed aggregations across batches. That’s acceptable
+here because fraud scoring is done within each micro-batch (we care
+about velocity within the <em>current</em> batch window, not across all
+time), and the external API call (EventBridge) has to run on the driver
+anyway — Spark workers don’t have AWS credentials.</p>
+<p>EventBridge <code>put_events</code> accepts up to 10 entries per
+call, so alerts are batched in groups of 10 inside
+<code>foreachBatch</code>.</p>
+<h3 id="checkpointing">5.4 Checkpointing</h3>
+<p>Every streaming query has a <code>checkpointLocation</code>. The
+checkpoint stores two things: the committed Kafka offsets (so the job
+doesn’t re-read messages it already processed) and the streaming query’s
+internal state (watermark position, deduplication state). Without
+checkpointing, a job restart re-reads from
+<code>startingOffsets="earliest"</code> and reprocesses everything.</p>
+<p>Checkpoints are stored in the same Delta base path as the tables, so
+they’re in the same storage system and survive container restarts.</p>
+<h3 id="wait_for_delta_table-startup-race-condition">5.5
+<code>wait_for_delta_table()</code> — startup race condition</h3>
+<p>Silver tries to <code>readStream</code> from the bronze Delta table.
+If silver starts before bronze has written its first micro-batch, the
+Delta table doesn’t exist yet and Spark throws
+<code>DELTA_SCHEMA_NOT_SET</code>. The fix is a polling loop using
+<code>DeltaTable.isDeltaTable(path)</code> — it retries every 10 seconds
+for up to 180 seconds. The same fix was applied to gold waiting for
+silver.</p>
+<hr />
+<h2 id="aws-alerting-design-decisions">6. AWS Alerting Design
+Decisions</h2>
+<h3 id="custom-eventbridge-bus">6.1 Custom EventBridge bus</h3>
+<p>A custom bus (<code>FraudflowBus</code>) was created rather than
+using the default bus for two reasons:</p>
+<ol type="1">
+<li><strong>Isolation.</strong> Events from other AWS services
+(CodePipeline, EC2, etc.) flow through the default bus. Using the
+default bus means your fraud rules might accidentally match unrelated
+events.</li>
+<li><strong>SAM shorthand limitation.</strong> SAM’s
+<code>Events:</code> shorthand in a
+<code>AWS::Serverless::Function</code> only works with the default bus.
+Custom bus wiring requires explicit <code>AWS::Events::Rule</code> +
+<code>AWS::Lambda::Permission</code> resources, which is more code but
+also more transparent about what’s happening.</li>
+</ol>
+<h3 id="aws_region_override-not-aws_region">6.2
+<code>AWS_REGION_OVERRIDE</code> not <code>AWS_REGION</code></h3>
+<p><code>AWS_REGION</code> is a reserved environment variable in the
+Lambda runtime — CloudFormation will reject the template if you try to
+set it. The Lambda handler reads <code>AWS_REGION_OVERRIDE</code> and
+falls back to <code>boto3</code>’s default region resolution (which
+picks up the Lambda execution region automatically anyway).</p>
+<h3 id="fraudalertfunctionpermission">6.3
+<code>FraudAlertFunctionPermission</code></h3>
+<p>Without an explicit <code>AWS::Lambda::Permission</code> granting
+<code>events.amazonaws.com</code> the right to invoke the Lambda,
+EventBridge silently accepts the <code>put-events</code> call, matches
+the rule, and then drops the event without invoking Lambda. No error is
+returned. This was the most counterintuitive pitfall in the AWS setup —
+always add the permission resource, always scope it to the specific rule
+ARN via <code>SourceArn</code>.</p>
+<h3 id="detail-must-be-a-json-encoded-string">6.4 <code>Detail</code>
+must be a JSON-encoded string</h3>
+<p>The EventBridge <code>put-events</code> API accepts
+<code>Detail</code> as a string. If you pass a Python dict directly
+(which <code>boto3</code> serializes to JSON), it works. But if you pass
+a nested object by accident (e.g. a dict that contains another dict
+already serialized as a string), rule matching silently fails. The
+convention enforced throughout is
+<code>"Detail": json.dumps(detail_dict)</code> — always an explicit
+<code>json.dumps</code>, never assumed.</p>
+<hr />
+<h2 id="databricks-portability-decisions">7. Databricks Portability
+Decisions</h2>
+<h3 id="delta_base_path-as-the-single-portability-lever">7.1
+<code>DELTA_BASE_PATH</code> as the single portability lever</h3>
+<p>All path construction flows through <code>BASE_PATH</code> in
+<code>00_setup.py</code>. This means moving the pipeline from local
+Docker to Databricks to S3 to Azure ADLS requires changing exactly one
+value. The design was intentional from the start — every path is a
+derivation of <code>BASE_PATH</code>, never hardcoded.</p>
+<h3 id="triggeravailablenowtrue-on-databricks">7.2
+<code>trigger(availableNow=True)</code> on Databricks</h3>
+<p>Local Docker jobs run with
+<code>trigger(processingTime="10 seconds")</code> and loop forever. On
+Databricks (especially Free Edition), notebook cells must terminate — a
+cell that runs forever blocks the notebook and eventually times out.
+<code>availableNow=True</code> processes all data currently in the
+source table and then stops cleanly. The cell finishes, the results are
+visible, and you can re-run to pick up new data.</p>
+<h3 id="unity-catalog-auto-detection">7.3 Unity Catalog
+auto-detection</h3>
+<p>Databricks Free Edition enforces Unity Catalog — raw
+<code>dbfs:/</code> paths are blocked. The fix in
+<code>00_setup.py</code> auto-detects the current catalog using
+<code>SELECT current_catalog()</code>, then creates a
+<code>fraudflow</code> schema and <code>data</code> volume if they don’t
+exist, and constructs
+<code>BASE_PATH = /Volumes/&lt;catalog&gt;/fraudflow/data</code>. The
+DBFS fallback is retained for Community Edition users.</p>
+<h3 id="self-contained-data-generator-on-databricks">7.4 Self-contained
+data generator on Databricks</h3>
+<p>Databricks Free Edition clusters sit behind NAT — they cannot reach a
+Kafka broker running on your laptop. Rather than requiring a cloud Kafka
+cluster (Confluent Cloud, MSK), <code>01_data_generator.py</code>
+contains a self-contained copy of the core producer logic (minus the
+Kafka send) and writes directly to the bronze Delta table. The fraud
+patterns and card/merchant simulation are identical to the local
+producer. This keeps the Databricks setup dependency-free.</p>
+<hr />
+<h2 id="key-challenges-and-solutions">8. Key Challenges and
+Solutions</h2>
+<h3 id="bitnamikafka3.7-tag-did-not-exist">8.1
+<code>bitnami/kafka:3.7</code> tag did not exist</h3>
+<p>Bitnami does not publish floating minor-version tags
+(<code>3.7</code>) — only full version tags (<code>3.7.0</code>). Worse,
+the <code>bitnami/kafka</code> image uses <code>KAFKA_CFG_*</code> env
+var naming, but the official <code>apache/kafka</code> image uses
+unprefixed <code>KAFKA_*</code> naming. Switching to
+<code>apache/kafka:3.7.0</code> required rewriting all env vars,
+generating a <code>CLUSTER_ID</code> with
+<code>kafka-storage.sh random-uuid</code>, and updating the volume path
+and health check command.</p>
+<h3 id="silver-delta_schema_not_set-on-startup">8.2 Silver
+<code>DELTA_SCHEMA_NOT_SET</code> on startup</h3>
+<p>Silver’s <code>readStream</code> from the bronze Delta table failed
+when silver started before bronze had written its first micro-batch (the
+table didn’t exist yet). Fixed with a
+<code>wait_for_delta_table()</code> polling function. The root cause is
+that in Docker Compose, all three Spark containers start roughly
+simultaneously — <code>restart: on-failure</code> was also added so the
+container retries if it loses the race.</p>
+<h3 id="gold-java_gateway_exited-out-of-memory">8.3 Gold
+<code>JAVA_GATEWAY_EXITED</code> (out of memory)</h3>
+<p>Three simultaneous PySpark JVMs each configured with
+<code>spark.driver.memory=2g</code> exceeded available RAM (6GB total,
+leaving nothing for the OS and Docker overhead). Reduced to
+<code>1g</code> per job. The fix was in <code>spark_utils.py</code> (one
+place) because all three jobs use the same
+<code>build_spark_session()</code> factory.</p>
+<h3 id="grafana-no-data-on-all-panels">8.4 Grafana “No data” on all
+panels</h3>
+<p>The pre-provisioned Grafana dashboard JSON referenced datasource UID
+<code>"prometheus"</code>, but Grafana auto-generated a random UID
+(<code>PBFA97CFB590B2093</code>) for the provisioned datasource. Fixed
+by adding <code>uid: prometheus</code> to the datasource provisioning
+YAML. Verified by calling the Grafana API
+(<code>GET /api/datasources</code>) to inspect the actual UID before and
+after the fix.</p>
+<h3 id="databricks-free-edition-dbfs-restriction">8.5 Databricks Free
+Edition DBFS restriction</h3>
+<p><code>dbfs:/fraudflow</code> paths are blocked on Free Edition (Unity
+Catalog enforcement). Fixed by auto-detecting the Unity Catalog catalog
+in <code>00_setup.py</code> and constructing a <code>/Volumes/</code>
+path. The <code>DESCRIBE HISTORY %sql</code> cell in
+<code>04_explore.py</code> also had a hardcoded DBFS path — replaced
+with a <code>%python</code> cell using an f-string so it picks up the
+dynamic <code>GOLD_PATH</code>.</p>
+<hr />
+<h2 id="results">9. Results</h2>
+<p>Pipeline validated end-to-end on Databricks Free Edition (50,000
+synthetic transactions):</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Rows</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bronze</td>
+<td>50,000</td>
+<td>Raw generated events</td>
+</tr>
+<tr>
+<td>Silver</td>
+<td>50,000</td>
+<td>0 dropped (no duplicates in synthetic data)</td>
+</tr>
+<tr>
+<td>Gold</td>
+<td>50,000</td>
+<td>Enriched with fraud signals</td>
+</tr>
+<tr>
+<td>High confidence</td>
+<td>261</td>
+<td>fraud_score ≥ 0.70 (0.52%)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fraud breakdown:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Events</th>
+<th>Avg Score</th>
+<th>Avg Amount</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>velocity_burst</code></td>
+<td>598</td>
+<td>0.441</td>
+<td>$46.79</td>
+</tr>
+<tr>
+<td><code>amount_spike</code></td>
+<td>252</td>
+<td>0.790</td>
+<td>$1,834.03</td>
+</tr>
+<tr>
+<td><code>impossible_travel</code></td>
+<td>129</td>
+<td>0.645</td>
+<td>$50.64</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Amount spikes average <strong>39× the normal transaction
+value</strong> ($1,834 vs $47)</li>
+<li>248 transactions have z-score &gt; 3 — all are amount spikes (the
+signal works)</li>
+<li>Fraud rate by country ranges from 1.53% (AU) to 2.59% (CA), close to
+the 1.5% target</li>
+</ul>
+<p><strong>Local Docker producer:</strong> tested at 1,000 events/min
+(default) through 50,000 events/min (configured max). Prometheus and
+Grafana dashboard confirmed live metrics at all throughput levels.</p>
+<hr />
+<h2 id="what-i-would-do-differently-at-production-scale">10. What I
+Would Do Differently at Production Scale</h2>
+<ol type="1">
+<li><p><strong>Avro + Schema Registry.</strong> JSON is convenient for
+development but schema drift is a real risk in production. Confluent
+Schema Registry with Avro (or Protobuf) would enforce
+compatibility.</p></li>
+<li><p><strong>Separate checkpoints per environment.</strong> Currently
+checkpoints live alongside data. In production, checkpoints belong in
+object storage (S3/GCS/ADLS) with versioned paths per
+deployment.</p></li>
+<li><p><strong>ML scoring layer.</strong> The rule-based fraud score
+(velocity + z-score + geo) is interpretable and fast, but a
+gradient-boosted model trained on labeled fraud data would significantly
+improve recall. The pipeline is designed to accommodate this — the gold
+layer is where the model inference step would go.</p></li>
+<li><p><strong>Dead letter queue.</strong> Events that fail schema
+validation in silver are silently dropped. A production system would
+route them to a DLQ (another Kafka topic or S3 prefix) for
+investigation.</p></li>
+<li><p><strong>Idempotent Lambda.</strong> The current Lambda sends one
+email per EventBridge event. At high fraud rates this could generate
+hundreds of emails per minute. Rate limiting (DynamoDB TTL-based dedup)
+or alert aggregation (SNS + digest Lambda) would be needed.</p></li>
+<li><p><strong>Terraform over SAM.</strong> SAM is convenient for
+Lambda-only stacks but Terraform would be more appropriate if the
+alerting infrastructure grew to include additional services.</p></li>
+</ol>
+</body>
+</html>

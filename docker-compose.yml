@@ -1,0 +1,211 @@
+services:
+  kafka:
+    # apache/kafka is the official Apache foundation image (bitnami:3.7 tag no longer exists).
+    # apache/kafka uses plain KAFKA_* env vars (no KAFKA_CFG_ prefix) and requires CLUSTER_ID.
+    image: apache/kafka:3.7.0
+    container_name: fraudflow-kafka
+    networks:
+      - fraudflow
+    ports:
+      - "9094:9094"   # EXTERNAL listener — used by host Kafka clients (kcat, console consumer)
+    environment:
+      # KRaft mode: this single node acts as both broker and controller.
+      # No Zookeeper required — Kafka manages its own metadata via the Raft consensus protocol.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      # A stable cluster ID is required for KRaft. Generated once with:
+      #   docker run --rm apache/kafka:3.7.0 /opt/kafka/bin/kafka-storage.sh random-uuid
+      CLUSTER_ID: "qYlRIxpJQ9aZGhLK8gcsbg"
+
+      # The controller quorum is just this single node (node ID 1 at kafka:9093).
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+
+      # Three listeners:
+      #   PLAINTEXT  — internal Docker traffic between containers (e.g. producer → Kafka)
+      #   CONTROLLER — Raft consensus traffic; never exposed outside the container
+      #   EXTERNAL   — host machine access (kcat, console consumer via localhost:9094)
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094"
+
+      # ADVERTISED_LISTENERS must NOT include CONTROLLER — including it crashes the broker.
+      # PLAINTEXT uses the Docker service name "kafka"; EXTERNAL uses localhost for host clients.
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094"
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Let producers auto-create topics on first publish.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+      # Retain messages for 6 hours (sufficient for local dev; no disk pressure concern).
+      KAFKA_LOG_RETENTION_HOURS: 6
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      # KRaft single-node startup takes ~20 seconds, so start_period gives it breathing room.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: fraudflow-prometheus
+    networks:
+      - fraudflow
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"   # allows hot-reload via POST /-/reload
+    healthcheck:
+      # prom/prometheus does not ship curl — use wget.
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: fraudflow-grafana
+    networks:
+      - fraudflow
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-fraudflow}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      # Provisioning directory pre-wires the Prometheus datasource on first boot —
+      # no manual UI configuration required.
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  producer:
+    # Use `profiles` so the producer does NOT start with `docker compose up -d`.
+    # Start it separately: docker compose --profile producer up -d producer
+    profiles: ["producer"]
+    build:
+      context: ./producer
+    container_name: fraudflow-producer
+    networks:
+      - fraudflow
+    ports:
+      - "8000:8000"   # Prometheus scrapes /metrics from here
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-transactions}
+      EVENTS_PER_MINUTE: ${EVENTS_PER_MINUTE:-1000}
+      FRAUD_RATE: ${FRAUD_RATE:-0.015}
+      NUM_CARDS: ${NUM_CARDS:-500}
+      NUM_MERCHANTS: ${NUM_MERCHANTS:-200}
+      METRICS_PORT: "8000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/metrics')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Spark Structured Streaming jobs ──────────────────────────────────────────
+  # Start all three with: docker compose --profile streaming up -d
+  # They must run in order conceptually (bronze writes before silver reads, etc.)
+  # but can be started simultaneously — each downstream job waits for its source
+  # Delta table to appear before processing begins.
+
+  spark-bronze:
+    profiles: ["streaming"]
+    build:
+      context: ./streaming
+    container_name: fraudflow-spark-bronze
+    restart: on-failure
+    networks:
+      - fraudflow
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-transactions}
+      DELTA_BASE_PATH: /data/fraudflow
+    volumes:
+      - delta_data:/data/fraudflow
+      # Cache Maven JARs across container restarts — avoids re-downloading Delta
+      # and Kafka connector JARs (~200 MB) on every `docker compose up`.
+      - ivy_cache:/root/.ivy2
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  spark-silver:
+    profiles: ["streaming"]
+    build:
+      context: ./streaming
+    container_name: fraudflow-spark-silver
+    restart: on-failure
+    command: ["python", "jobs/silver_cleansing.py"]
+    networks:
+      - fraudflow
+    environment:
+      DELTA_BASE_PATH: /data/fraudflow
+    volumes:
+      - delta_data:/data/fraudflow
+      - ivy_cache:/root/.ivy2
+    depends_on:
+      - spark-bronze
+
+  spark-gold:
+    profiles: ["streaming"]
+    build:
+      context: ./streaming
+    container_name: fraudflow-spark-gold
+    restart: on-failure
+    command: ["python", "jobs/gold_fraud_signals.py"]
+    networks:
+      - fraudflow
+    environment:
+      DELTA_BASE_PATH: /data/fraudflow
+      # Optional: set these to enable EventBridge alerting from the gold job.
+      AWS_REGION_OVERRIDE: ${AWS_REGION_OVERRIDE:-us-east-1}
+      EVENTBRIDGE_BUS_NAME: ${EVENTBRIDGE_BUS_NAME:-FraudflowBus}
+      # AWS credentials — set in .env.local (gitignored), not here.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - delta_data:/data/fraudflow
+      - ivy_cache:/root/.ivy2
+    depends_on:
+      - spark-silver
+
+networks:
+  fraudflow:
+    driver: bridge
+
+volumes:
+  kafka_data:
+  prometheus_data:
+  grafana_data:
+  # Shared Delta Lake storage: all three Spark jobs read/write here.
+  delta_data:
+  # Maven/Ivy JAR cache: avoids re-downloading ~200 MB of JARs on every restart.
+  ivy_cache:

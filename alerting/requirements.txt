@@ -1,0 +1,6 @@
+# boto3 ships pre-installed in the Lambda Python 3.12 runtime, so SAM will NOT
+# bundle it into the deployment artifact. This file exists so your IDE and any
+# local test scripts can resolve boto3 types without errors.
+# DO NOT pin a version — pinning causes SAM to bundle a specific boto3 into the
+# Lambda package, which may conflict with the version already in the runtime layer.
+boto3
