@@ -1,7 +1,7 @@
 {
   "uid": "fraudflow-main",
   "title": "FraudFlow Pipeline",
-  "description": "Real-time payments fraud detection — producer throughput, fraud rate, and pipeline health",
+  "description": "Real-time payments fraud detection: producer throughput, fraud rate, and pipeline health",
   "tags": ["fraudflow", "kafka", "streaming"],
   "timezone": "browser",
   "schemaVersion": 38,
@@ -173,7 +173,7 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Throughput — Fraud vs Legitimate (events / min)",
+      "title": "Throughput: Fraud vs Legitimate (events / min)",
       "description": "Stacked view of fraud-flagged and legitimate events produced per minute. Fraud spikes correspond to velocity bursts and amount spikes injected by the producer.",
       "gridPos": { "x": 0, "y": 4, "w": 16, "h": 9 },
       "options": {

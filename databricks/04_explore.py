@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Exploratory Analysis — Gold Table
+# MAGIC # Exploratory Analysis : Gold Table
 # MAGIC
 # MAGIC Portfolio-ready queries and visualizations on the gold fraud signals table.
 # MAGIC Use these as talking points when presenting the project.
@@ -81,7 +81,7 @@ display(
 # MAGIC ## Amount Z-Score Distribution
 # MAGIC
 # MAGIC Z-score > 3 means the transaction amount is more than 3 standard deviations
-# MAGIC above the card's batch mean — a strong amount-spike signal.
+# MAGIC above the card's batch mean : a strong amount-spike signal.
 
 # COMMAND ----------
 
@@ -124,7 +124,7 @@ display(
 # MAGIC %md
 # MAGIC ## Delta Table History (Lineage)
 # MAGIC
-# MAGIC Delta Lake tracks every write operation — useful for debugging and auditing.
+# MAGIC Delta Lake tracks every write operation : useful for debugging and auditing.
 
 # COMMAND ----------
 

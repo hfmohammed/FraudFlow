@@ -14,7 +14,6 @@ class Config:
     num_cards: int
     num_merchants: int
     metrics_port: int
-    # Derived from events_per_minute — computed once here so the hot loop never divides.
     sleep_interval_seconds: float
 
 

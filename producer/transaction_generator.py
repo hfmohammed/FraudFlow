@@ -6,8 +6,6 @@ from typing import Optional
 
 from config import Config
 
-# (lat, lon) centroids for cities used as card home locations and merchant locations.
-# Jitter is applied at init to prevent all cards/merchants from stacking on the same point.
 CITY_COORDS: dict[str, list[tuple[float, float]]] = {
     "US": [(40.71, -74.01), (34.05, -118.24), (41.88, -87.63), (29.76, -95.37)],
     "GB": [(51.51, -0.13), (53.48, -2.24)],
@@ -35,7 +33,6 @@ HOME_COUNTRY_WEIGHTS = {
 }
 
 MERCHANT_CATEGORIES = ["grocery", "gas", "restaurant", "retail", "travel", "online"]
-# Weights reflect real-world transaction frequency distribution.
 CATEGORY_WEIGHTS = [0.22, 0.15, 0.23, 0.20, 0.08, 0.12]
 
 
@@ -51,9 +48,7 @@ class CardProfile:
     last_transaction_country: Optional[str] = None
     last_transaction_lat: Optional[float] = None
     last_transaction_lon: Optional[float] = None
-    # Sliding window of recent transaction timestamps, pruned to the last 60s each call.
     velocity_window_transactions: list = field(default_factory=list)
-    # Set > 0 by VelocityBurstPattern to chain rapid-fire transactions on this card.
     velocity_burst_remaining: int = 0
 
 
@@ -94,7 +89,6 @@ class TransactionGenerator:
             category = random.choices(MERCHANT_CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
 
             if category == "online":
-                # Online merchants have no physical location; country is the billing country.
                 self.merchant_pool.append(
                     MerchantRecord(
                         merchant_id=f"MERCH-{i:04d}",
@@ -122,7 +116,6 @@ class TransactionGenerator:
             country = _pick_country()
             base_lat, base_lon = _city_for_country(country)
 
-            # Per-card spend range sampled from a realistic distribution.
             low = max(5.0, random.gauss(15, 8))
             high = low + random.uniform(30, 100)
 
@@ -146,13 +139,11 @@ class TransactionGenerator:
     def generate_transaction(self, card_id: str, fraud_decision) -> dict:
         """
         Build one transaction dict. `fraud_decision` is a FraudDecision namedtuple
-        from FraudInjector — it carries the pattern instance (or None for legitimate).
+        from FraudInjector : it carries the pattern instance (or None for legitimate).
         """
         card = self.card_profiles[card_id]
         now = datetime.now(tz=timezone.utc)
 
-        # Prune velocity window to the last 60 seconds before any fraud check.
-        # Without this, the list grows unbounded over a long run.
         cutoff = now - timedelta(seconds=60)
         card.velocity_window_transactions = [
             t for t in card.velocity_window_transactions if t > cutoff
@@ -176,7 +167,6 @@ class TransactionGenerator:
                 "fraud_type": None,
             }
 
-        # Update card state so future fraud patterns have accurate temporal context.
         card.last_transaction_time = now
         card.last_transaction_country = txn["country"]
         card.last_transaction_lat = txn["lat"]
@@ -187,7 +177,6 @@ class TransactionGenerator:
             {
                 "transaction_id": str(uuid.uuid4()),
                 "card_id": card_id,
-                # ISO 8601 UTC with explicit Z suffix — Spark's to_timestamp() expects this.
                 "timestamp": now.isoformat().replace("+00:00", "Z"),
             }
         )

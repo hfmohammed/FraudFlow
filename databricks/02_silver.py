@@ -1,13 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Silver Layer — Dedup + Validation
+# MAGIC # Silver Layer : Dedup + Validation
 # MAGIC
 # MAGIC Reads the bronze Delta table, deduplicates by `transaction_id`, validates
 # MAGIC required fields, and writes clean rows to the silver Delta table.
 # MAGIC
 # MAGIC **Key difference from local Docker:**
 # MAGIC `trigger(availableNow=True)` replaces `trigger(processingTime="15 seconds")`.
-# MAGIC `availableNow` processes all data currently in the source table, then stops —
+# MAGIC `availableNow` processes all data currently in the source table, then stops :
 # MAGIC perfect for running in a notebook cell. On local Docker the job runs forever.
 # MAGIC
 # MAGIC **Run order:** `00_setup` → `01_data_generator` → **`02_silver`** → `03_gold` → `04_explore`
@@ -25,13 +25,6 @@ bronze_stream = spark.readStream.format("delta").load(BRONZE_PATH)
 cleaned = (
     bronze_stream
     .withColumn("event_time", to_timestamp("timestamp"))
-
-    # WHY withWatermark:
-    #   dropDuplicates must track every transaction_id it has seen to reject future
-    #   duplicates. Without a watermark that state grows forever — a streaming job
-    #   running for days would eventually OOM. "10 minutes" tells Spark it can safely
-    #   discard state for events whose event_time is more than 10 minutes behind the
-    #   latest event seen. Very-late duplicates pass through, but memory stays bounded.
     .withWatermark("event_time", "10 minutes")
 
     .filter(
@@ -41,18 +34,11 @@ cleaned = (
         & col("event_time").isNotNull()
     )
 
-    # dropDuplicates with the watermark column keeps state bounded.
     .dropDuplicates(["transaction_id", "event_time"])
 )
 
 # COMMAND ----------
 
-# WHY trigger(availableNow=True):
-#   On Databricks (especially CE), you want streaming jobs in notebooks to finish
-#   rather than run forever. availableNow processes all data in the source at the
-#   time of execution, then terminates. You can re-run the cell to pick up new data.
-#   On a production cluster you'd switch back to processingTime or use a Databricks Job
-#   that runs continuously.
 query = (
     cleaned.writeStream
     .format("delta")

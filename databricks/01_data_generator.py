@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze Layer — Synthetic Data Generator
+# MAGIC # Bronze Layer : Synthetic Data Generator
 # MAGIC
 # MAGIC **Why this notebook exists:**
 # MAGIC Databricks Community Edition clusters cannot reach your local Kafka broker
@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-# ── City coordinates for realistic geo distribution ────────────────────────
 CITY_COORDS = {
     "US": [(40.71, -74.01), (34.05, -118.24), (41.88, -87.63)],
     "GB": [(51.51, -0.13), (53.48, -2.24)],
@@ -204,7 +203,6 @@ class FraudInjector:
         adj = min(max(self._target * (1 + (self._target - current) / max(self._target, 0.001)), 0), 1)
         if random.random() >= adj:
             return {"pattern": None}
-        # pick pattern
         if card.last_time and (datetime.now(tz=timezone.utc) - card.last_time).seconds < 300 and random.random() < 0.3:
             self._fraud_count += 1
             return {"pattern": _apply_travel}
@@ -245,7 +243,7 @@ SCHEMA = StructType([
 
 # COMMAND ----------
 
-NUM_EVENTS = 50_000    # ~30 seconds on CE; increase for a larger dataset
+NUM_EVENTS = 50_000
 FRAUD_RATE  = 0.015
 
 gen      = TransactionGenerator(num_cards=500, num_merchants=200)

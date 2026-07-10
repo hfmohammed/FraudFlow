@@ -5,8 +5,6 @@ from pyspark.sql import SparkSession
 
 logger = logging.getLogger(__name__)
 
-# These versions must stay in sync with requirements.txt.
-# Scala 2.12 matches PySpark 3.5.x — do not use 2.13.
 _DELTA_PACKAGE = "io.delta:delta-spark_2.12:3.1.0"
 _KAFKA_PACKAGE = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
 
@@ -35,12 +33,8 @@ def build_spark_session(app_name: str, include_kafka: bool = False) -> SparkSess
             "spark.sql.catalog.spark_catalog",
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",
         )
-        # Local mode default is 200 shuffle partitions — way too many for a laptop.
-        # 4 keeps task overhead low while still allowing some parallelism.
         .config("spark.sql.shuffle.partitions", "4")
-        # 1 g per job — three JVMs run simultaneously; 2 g each would OOM most laptops.
         .config("spark.driver.memory", "1g")
-        # Suppress noisy Delta INFO logs; WARN still surfaces real problems.
         .config("spark.databricks.delta.retentionDurationCheck.enabled", "false")
     )
 

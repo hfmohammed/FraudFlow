@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>FraudFlow — Technical Writeup</title>
+  <title>FraudFlow Technical Writeup</title>
   <style>
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -173,9 +173,9 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">FraudFlow — Technical Writeup</h1>
+<h1 class="title">FraudFlow Technical Writeup</h1>
 </header>
-<h1 id="fraudflow-technical-writeup">FraudFlow — Technical Writeup</h1>
+<h1 id="fraudflow-technical-writeup">FraudFlow : Technical Writeup</h1>
 <p><strong>What it is:</strong> A real-time payments fraud detection
 pipeline built from scratch as a data engineering portfolio project.
 Simulated card transactions flow through Kafka into a PySpark Structured
@@ -189,7 +189,7 @@ to a Kafka topic for downstream consumers, and monitoring via Prometheus
 data engineering. The challenge is not detection accuracy (that’s an ML
 problem) but <em>pipeline design</em>: how do you process millions of
 events per day, deduplicate them reliably, compute per-card aggregations
-in near real-time, and fire alerts within seconds — all without losing
+in near real-time, and fire alerts within seconds : all without losing
 data or duplicating alerts?</p>
 <p>This project builds the data engineering layer of that system. The
 fraud scoring is intentionally rule-based (z-scores, velocity counts,
@@ -214,7 +214,7 @@ PySpark Structured Streaming
 
 Prometheus ← producer /metrics
 Grafana    ← Prometheus</code></pre>
-<p>The same silver and gold logic runs on Databricks Free Edition —
+<p>The same silver and gold logic runs on Databricks Free Edition :
 replacing Kafka with a self-contained data generator notebook, and
 swapping <code>processingTime</code> triggers for
 <code>availableNow</code>.</p>
@@ -229,7 +229,7 @@ payments systems (Stripe, Square, Adyen) use Kafka or Kafka-compatible
 systems. Portfolio credibility matters.</li>
 <li><strong>Consumer group semantics.</strong> Multiple Spark jobs
 (bronze, silver, gold) can each maintain their own committed offset
-independently. With a queue like RabbitMQ, a message is consumed once —
+independently. With a queue like RabbitMQ, a message is consumed once :
 you can’t have three independent consumers at different positions.</li>
 <li><strong>Spark Structured Streaming has native Kafka
 integration.</strong> <code>spark.readStream.format("kafka")</code> is a
@@ -245,7 +245,7 @@ container, separate port, and separate failure mode.</li>
 Kafka 3.7 and will be removed in a future release. New projects should
 not use it.</li>
 <li><strong>Simpler mental model.</strong> KRaft means the broker is
-also the controller — no split-brain between broker state and Zookeeper
+also the controller : no split-brain between broker state and Zookeeper
 state.</li>
 </ul>
 <p>The tradeoff is that the env var setup is more verbose (you must set
@@ -299,7 +299,7 @@ The consequence: the Docker base image must be
 libc).</p>
 <h3 id="json-over-avro">3.4 JSON over Avro</h3>
 <p>Avro with a Schema Registry is the production standard for Kafka
-message serialization — it enforces schema evolution, is compact, and
+message serialization : it enforces schema evolution, is compact, and
 self-describes. JSON was chosen here because:</p>
 <ol type="1">
 <li><strong>No schema registry to run.</strong> Avro requires Confluent
@@ -308,11 +308,11 @@ interesting parts.</li>
 <li><strong>Human readable.</strong> You can <code>kcat</code> a topic
 and read the events directly.</li>
 <li><strong>Spark reads it with <code>from_json()</code></strong> and an
-explicit StructType — no additional libraries.</li>
+explicit StructType : no additional libraries.</li>
 </ol>
 <p>The comment in <code>producer.py</code> notes that production would
 use Avro + Schema Registry. The schema is explicitly defined as a
-StructType in <code>bronze_ingestion.py</code> rather than inferred —
+StructType in <code>bronze_ingestion.py</code> rather than inferred :
 schema inference on Kafka JSON is unreliable and slow.</p>
 <h3 id="delta-lake-over-parquet">3.5 Delta Lake over Parquet</h3>
 <p>Plain Parquet files would work for batch analytics, but Delta Lake
@@ -323,7 +323,7 @@ simultaneously won’t corrupt the table.</li>
 <li><strong>Schema enforcement.</strong> Writes that don’t match the
 table schema are rejected.</li>
 <li><strong><code>DESCRIBE HISTORY</code>.</strong> Every write is
-logged — useful for debugging and auditing (demonstrated in
+logged : useful for debugging and auditing (demonstrated in
 <code>04_explore.py</code>).</li>
 <li><strong>Streaming source support.</strong>
 <code>spark.readStream.format("delta")</code> lets silver read from
@@ -342,7 +342,7 @@ Grafana visualizes it. This was chosen because:</p>
 <li>The pull model (Prometheus scrapes the producer) works perfectly in
 Docker Compose without any additional configuration inside the producer
 beyond exposing the endpoint.</li>
-<li>Grafana dashboard JSON can be pre-provisioned as a file — no manual
+<li>Grafana dashboard JSON can be pre-provisioned as a file : no manual
 UI setup required on first boot.</li>
 <li>Prometheus + Grafana is the dominant open-source observability
 stack, appearing in nearly every data engineering interview discussion
@@ -362,7 +362,7 @@ injection_probability = clamp(adjustment, 0, 1)</code></pre>
 <p>If the realized rate is below target,
 <code>injection_probability</code> exceeds <code>target</code> to
 compensate. If above, it’s suppressed. Velocity bursts bypass this check
-intentionally — a burst is a single fraud event that happens to generate
+intentionally : a burst is a single fraud event that happens to generate
 many transactions; stopping it mid-burst would be unrealistic.</p>
 <h3 id="velocity-window-pruning">4.2 Velocity window pruning</h3>
 <p><code>CardProfile.velocity_window</code> stores timestamps of recent
@@ -374,7 +374,7 @@ pruned. Pruning at the start keeps the list bounded even under burst
 conditions.</p>
 <h3 id="producer.poll0-in-the-main-loop">4.3
 <code>producer.poll(0)</code> in the main loop</h3>
-<p>The <code>confluent-kafka</code> producer is asynchronous —
+<p>The <code>confluent-kafka</code> producer is asynchronous :
 <code>produce()</code> enqueues a message, but delivery callbacks
 (<code>on_delivery</code>) only fire when you call <code>poll()</code>.
 This is a common source of bugs: the producer seems to work (no
@@ -392,7 +392,7 @@ for metadata requests, which it doesn’t handle.</p>
 <hr />
 <h2 id="streaming-design-decisions">5. Streaming Design Decisions</h2>
 <h3 id="bronze-raw-and-immutable">5.1 Bronze: raw and immutable</h3>
-<p>Bronze ingests from Kafka with no transformation — only schema
+<p>Bronze ingests from Kafka with no transformation : only schema
 parsing and adding <code>bronze_ingest_time</code>. The reasoning: if
 silver or gold logic turns out to be wrong, you can always re-derive
 them from bronze. If bronze itself transforms data and the
@@ -407,7 +407,7 @@ Silver: why watermarking is necessary for deduplication</h3>
 <p><code>dropDuplicates(["transaction_id", "event_time"])</code> sounds
 simple, but in a streaming context Spark has to <em>remember</em> every
 transaction_id it has ever seen to reject future duplicates. Without a
-bound, that state grows forever — a job running for days would
+bound, that state grows forever : a job running for days would
 eventually OOM.</p>
 <p><code>.withWatermark("event_time", "10 minutes")</code> tells Spark:
 “events more than 10 minutes behind the latest event seen can be dropped
@@ -417,7 +417,7 @@ payments system, a duplicate arriving more than 10 minutes late would be
 rejected by the downstream idempotency layer anyway.</p>
 <p>The watermark must be applied <em>before</em>
 <code>dropDuplicates</code>, and the watermark column must be included
-in the <code>dropDuplicates</code> key — Spark requires this to
+in the <code>dropDuplicates</code> key : Spark requires this to
 correctly bound the state.</p>
 <h3 id="gold-foreachbatch-instead-of-native-streaming-aggregations">5.3
 Gold: <code>foreachBatch</code> instead of native streaming
@@ -433,7 +433,7 @@ management for windowed aggregations across batches. That’s acceptable
 here because fraud scoring is done within each micro-batch (we care
 about velocity within the <em>current</em> batch window, not across all
 time), and the Kafka publish runs on the driver where the
-confluent-kafka Producer lives — it is not serializable to
+confluent-kafka Producer lives : it is not serializable to
 executors.</p>
 <h3 id="checkpointing">5.4 Checkpointing</h3>
 <p>Every streaming query has a <code>checkpointLocation</code>. The
@@ -445,12 +445,12 @@ checkpointing, a job restart re-reads from
 <p>Checkpoints are stored in the same Delta base path as the tables, so
 they’re in the same storage system and survive container restarts.</p>
 <h3 id="wait_for_delta_table-startup-race-condition">5.5
-<code>wait_for_delta_table()</code> — startup race condition</h3>
+<code>wait_for_delta_table()</code> : startup race condition</h3>
 <p>Silver tries to <code>readStream</code> from the bronze Delta table.
 If silver starts before bronze has written its first micro-batch, the
 Delta table doesn’t exist yet and Spark throws
 <code>DELTA_SCHEMA_NOT_SET</code>. The fix is a polling loop using
-<code>DeltaTable.isDeltaTable(path)</code> — it retries every 10 seconds
+<code>DeltaTable.isDeltaTable(path)</code> : it retries every 10 seconds
 for up to 180 seconds. The same fix was applied to gold waiting for
 silver.</p>
 <hr />
@@ -461,20 +461,20 @@ Decisions</h2>
 <p>All path construction flows through <code>BASE_PATH</code> in
 <code>00_setup.py</code>. This means moving the pipeline from local
 Docker to Databricks to S3 to Azure ADLS requires changing exactly one
-value. The design was intentional from the start — every path is a
+value. The design was intentional from the start : every path is a
 derivation of <code>BASE_PATH</code>, never hardcoded.</p>
 <h3 id="triggeravailablenowtrue-on-databricks">6.2
 <code>trigger(availableNow=True)</code> on Databricks</h3>
 <p>Local Docker jobs run with
 <code>trigger(processingTime="10 seconds")</code> and loop forever. On
-Databricks (especially Free Edition), notebook cells must terminate — a
+Databricks (especially Free Edition), notebook cells must terminate : a
 cell that runs forever blocks the notebook and eventually times out.
 <code>availableNow=True</code> processes all data currently in the
 source table and then stops cleanly. The cell finishes, the results are
 visible, and you can re-run to pick up new data.</p>
 <h3 id="unity-catalog-auto-detection">6.3 Unity Catalog
 auto-detection</h3>
-<p>Databricks Free Edition enforces Unity Catalog — raw
+<p>Databricks Free Edition enforces Unity Catalog : raw
 <code>dbfs:/</code> paths are blocked. The fix in
 <code>00_setup.py</code> auto-detects the current catalog using
 <code>SELECT current_catalog()</code>, then creates a
@@ -484,7 +484,7 @@ exist, and constructs
 DBFS fallback is retained for Community Edition users.</p>
 <h3 id="self-contained-data-generator-on-databricks">6.4 Self-contained
 data generator on Databricks</h3>
-<p>Databricks Free Edition clusters sit behind NAT — they cannot reach a
+<p>Databricks Free Edition clusters sit behind NAT : they cannot reach a
 Kafka broker running on your laptop. Rather than requiring a cloud Kafka
 cluster, <code>01_data_generator.py</code> contains a self-contained
 copy of the core producer logic (minus the Kafka send) and writes
@@ -497,7 +497,7 @@ Solutions</h2>
 <h3 id="bitnamikafka3.7-tag-did-not-exist">7.1
 <code>bitnami/kafka:3.7</code> tag did not exist</h3>
 <p>Bitnami does not publish floating minor-version tags
-(<code>3.7</code>) — only full version tags (<code>3.7.0</code>). Worse,
+(<code>3.7</code>) : only full version tags (<code>3.7.0</code>). Worse,
 the <code>bitnami/kafka</code> image uses <code>KAFKA_CFG_*</code> env
 var naming, but the official <code>apache/kafka</code> image uses
 unprefixed <code>KAFKA_*</code> naming. Switching to
@@ -512,7 +512,7 @@ when silver started before bronze had written its first micro-batch (the
 table didn’t exist yet). Fixed with a
 <code>wait_for_delta_table()</code> polling function. The root cause is
 that in Docker Compose, all three Spark containers start roughly
-simultaneously — <code>restart: on-failure</code> was also added so the
+simultaneously : <code>restart: on-failure</code> was also added so the
 container retries if it loses the race.</p>
 <h3 id="gold-java_gateway_exited-out-of-memory">7.3 Gold
 <code>JAVA_GATEWAY_EXITED</code> (out of memory)</h3>
@@ -537,7 +537,7 @@ Edition DBFS restriction</h3>
 Catalog enforcement). Fixed by auto-detecting the Unity Catalog catalog
 in <code>00_setup.py</code> and constructing a <code>/Volumes/</code>
 path. The <code>DESCRIBE HISTORY %sql</code> cell in
-<code>04_explore.py</code> also had a hardcoded DBFS path — replaced
+<code>04_explore.py</code> also had a hardcoded DBFS path : replaced
 with a <code>%python</code> cell using an f-string so it picks up the
 dynamic <code>GOLD_PATH</code>.</p>
 <hr />
@@ -609,7 +609,7 @@ synthetic transactions):</p>
 <ul>
 <li>Amount spikes average <strong>39× the normal transaction
 value</strong> ($1,834 vs $47)</li>
-<li>248 transactions have z-score &gt; 3 — all are amount spikes (the
+<li>248 transactions have z-score &gt; 3 : all are amount spikes (the
 signal works)</li>
 <li>Fraud rate by country ranges from 1.53% (AU) to 2.59% (CA), close to
 the 1.5% target</li>
@@ -632,7 +632,7 @@ deployment.</p></li>
 <li><p><strong>ML scoring layer.</strong> The rule-based fraud score
 (velocity + z-score + geo) is interpretable and fast, but a
 gradient-boosted model trained on labeled fraud data would significantly
-improve recall. The pipeline is designed to accommodate this — the gold
+improve recall. The pipeline is designed to accommodate this : the gold
 layer is where the model inference step would go.</p></li>
 <li><p><strong>Dead letter queue.</strong> Events that fail schema
 validation in silver are silently dropped. A production system would

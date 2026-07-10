@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Gold Layer — Fraud Signals
+# MAGIC # Gold Layer : Fraud Signals
 # MAGIC
 # MAGIC Reads silver, computes per-card fraud signals using `foreachBatch`, and
 # MAGIC writes enriched rows to the gold Delta table.
@@ -91,12 +91,6 @@ silver_stream = (
     .withColumn("event_time", to_timestamp("timestamp"))
 )
 
-# WHY foreachBatch:
-#   Gives you the full batch DataFrame API inside each micro-batch — multi-step
-#   joins, external Kafka publish calls, complex scoring logic. The trade-off
-#   is losing Spark's built-in state management for windowed aggregations. For
-#   gold-layer business logic that needs all of the above, foreachBatch is the
-#   standard pattern in production Spark Streaming codebases.
 query = (
     silver_stream.writeStream
     .foreachBatch(process_batch)

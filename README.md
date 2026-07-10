@@ -1,6 +1,6 @@
 # FraudFlow
 
-Real-time payments fraud detection pipeline — a data engineering portfolio project.
+Real-time payments fraud detection pipeline : a data engineering portfolio project.
 
 ## Architecture
 
@@ -94,10 +94,10 @@ Each event looks like:
 | Service | URL | Credentials |
 |---|---|---|
 | Grafana | http://localhost:3000 | admin / fraudflow |
-| Prometheus | http://localhost:9090 | — |
-| Producer metrics | http://localhost:8000/metrics | — |
+| Prometheus | http://localhost:9090 | : |
+| Producer metrics | http://localhost:8000/metrics | : |
 
-Prometheus targets page: http://localhost:9090/targets — `producer:8000` should show **UP**.
+Prometheus targets page: http://localhost:9090/targets : `producer:8000` should show **UP**.
 
 ### 5. Tune the producer
 
@@ -111,8 +111,8 @@ EVENTS_PER_MINUTE=5000 FRAUD_RATE=0.02 docker compose --profile producer up prod
 |---|---|---|
 | `EVENTS_PER_MINUTE` | 1000 | 1 – 50000 |
 | `FRAUD_RATE` | 0.015 | 0.0 – 0.5 |
-| `NUM_CARDS` | 500 | — |
-| `NUM_MERCHANTS` | 200 | — |
+| `NUM_CARDS` | 500 | : |
+| `NUM_MERCHANTS` | 200 | : |
 
 ### 6. Stop everything
 
@@ -171,7 +171,7 @@ FraudFlow/
 │       └── gold_fraud_signals.py # Velocity, z-score, geo signals → fraud-alerts topic
 └── databricks/                 # Databricks Free Edition notebooks
     ├── 00_setup.py             # Shared paths (auto-detects Unity Catalog)
-    ├── 01_data_generator.py    # Replaces Kafka on CE — generates synthetic data
+    ├── 01_data_generator.py    # Replaces Kafka on CE : generates synthetic data
     ├── 02_silver.py            # Same logic as streaming/silver, availableNow trigger
     ├── 03_gold.py              # Same logic as streaming/gold, availableNow trigger
     ├── 04_explore.py           # Portfolio queries: fraud breakdown, z-scores, lineage
@@ -202,8 +202,8 @@ FraudFlow/
 
 ## Roadmap
 
-- [x] Kafka producer — 1k–50k events/min, three fraud patterns, Prometheus metrics
-- [x] PySpark Structured Streaming — bronze/silver/gold Delta medallion (local Docker)
-- [x] Grafana dashboard — events/min, fraud rate, throughput, processing lag
-- [x] Kafka alerting — high-confidence fraud events published to `fraud-alerts` topic
-- [x] Databricks Free Edition — full pipeline on serverless compute, Unity Catalog volumes
+- [x] Kafka producer : 1k–50k events/min, three fraud patterns, Prometheus metrics
+- [x] PySpark Structured Streaming : bronze/silver/gold Delta medallion (local Docker)
+- [x] Grafana dashboard : events/min, fraud rate, throughput, processing lag
+- [x] Kafka alerting : high-confidence fraud events published to `fraud-alerts` topic
+- [x] Databricks Free Edition : full pipeline on serverless compute, Unity Catalog volumes

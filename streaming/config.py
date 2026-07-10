@@ -7,11 +7,6 @@ class StreamingConfig:
     kafka_bootstrap_servers: str
     kafka_topic: str
     alerts_topic: str
-    # DELTA_BASE_PATH is the only path that needs to change between environments:
-    #   Local Docker:   /data/fraudflow          (bind-mounted volume)
-    #   Databricks:     dbfs:/fraudflow          (DBFS) or abfss://... (ADLS)
-    #   S3/EMR:         s3://your-bucket/fraudflow
-    # All table and checkpoint paths derive from this single root.
     base_path: str
 
     @property

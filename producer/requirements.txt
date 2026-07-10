@@ -1,4 +1,4 @@
-# confluent-kafka 2.4.0 bundles a pre-built librdkafka binary in its wheel —
+# confluent-kafka 2.4.0 bundles a pre-built librdkafka binary in its wheel :
 # no C compiler or separate librdkafka install needed in the Docker image.
 # IMPORTANT: use python:3.12-slim (Debian/glibc) as the base image, NOT Alpine
 # (musl libc). The binary wheels on PyPI are glibc-linked and won't run on Alpine.
