@@ -6,10 +6,11 @@ from dataclasses import dataclass
 class StreamingConfig:
     kafka_bootstrap_servers: str
     kafka_topic: str
+    alerts_topic: str
     # DELTA_BASE_PATH is the only path that needs to change between environments:
     #   Local Docker:   /data/fraudflow          (bind-mounted volume)
     #   Databricks:     dbfs:/fraudflow          (DBFS) or abfss://... (ADLS)
-    #   AWS EMR:        s3://your-bucket/fraudflow
+    #   S3/EMR:         s3://your-bucket/fraudflow
     # All table and checkpoint paths derive from this single root.
     base_path: str
 
@@ -44,5 +45,6 @@ def load_config() -> StreamingConfig:
             "KAFKA_BOOTSTRAP_SERVERS", "localhost:9094"
         ),
         kafka_topic=os.environ.get("KAFKA_TOPIC", "transactions"),
+        alerts_topic=os.environ.get("KAFKA_ALERTS_TOPIC", "fraud-alerts"),
         base_path=os.environ.get("DELTA_BASE_PATH", "/tmp/fraudflow"),
     )

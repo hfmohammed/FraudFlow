@@ -15,26 +15,18 @@ flowchart LR
         G[("Gold\nDelta Table")]
         PR["Prometheus"]
         GR["Grafana"]
-        P -- "JSON events\n1k–50k/min" --> K
+        P -- "JSON events\n1k/min" --> K
         K --> SP
         SP --> B
         B --> S
         S --> G
+        G -- "fraud rows\n(score ≥ 0.70)" --> A[("fraud-alerts\nKafka topic")]
         P -- "/metrics" --> PR
         PR --> GR
     end
-
-    subgraph aws["AWS (alerting)"]
-        EB["EventBridge\nFraudflowBus"]
-        L["Lambda\nFraudAlertFunction"]
-        SES["SES\nemail alert"]
-        G -- "put-events\n(fraud rows)" --> EB
-        EB -- "FraudDetected rule" --> L
-        L --> SES
-    end
 ```
 
-**Stack:** Kafka (KRaft), PySpark Structured Streaming, Delta Lake (bronze/silver/gold medallion), Prometheus, Grafana, AWS Lambda + EventBridge + SES
+**Stack:** Kafka (KRaft), PySpark Structured Streaming, Delta Lake (bronze/silver/gold medallion), Prometheus, Grafana
 
 ---
 
@@ -142,44 +134,15 @@ The producer injects three fraud patterns at the configured `FRAUD_RATE` (~1.5% 
 
 Each event carries `is_fraud: true/false` and `fraud_type: <string or null>` as ground-truth labels for downstream ML.
 
----
+## Kafka Alerting
 
-## AWS Alerting (Lambda + EventBridge + SES)
-
-When the Spark gold job (Phase 2) detects fraud, it publishes to an EventBridge custom bus. A Lambda function receives the event and sends an HTML email via SES.
-
-### Prerequisites
-1. `aws configure` with an IAM user that has AdministratorAccess
-2. Verify both sender and recipient email in **SES console → Verified Identities** (required in SES sandbox)
-3. `brew install aws-sam-cli` and confirm with `sam --version`
-
-### Deploy
+When the gold job scores a transaction above 0.70, it publishes the event to the `fraud-alerts` Kafka topic. Any downstream consumer (notifications service, case management tool, dashboard) subscribes independently.
 
 ```bash
-cd alerting
-sam build
-sam deploy --guided   # first time only — creates samconfig.toml (gitignored)
+# Watch fraud alerts in real time
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic fraud-alerts
 ```
-
-Pass `--parameter-overrides SenderEmail=you@example.com RecipientEmail=you@example.com` on subsequent deploys.
-
-### Test without Spark
-
-```bash
-# Test the Lambda locally (SES call will fail without real AWS creds)
-sam local invoke FraudAlertFunction \
-  --event events/test_fraud_event.json \
-  --env-vars '{"FraudAlertFunction":{"SENDER_EMAIL":"you@example.com","RECIPIENT_EMAIL":"you@example.com","AWS_REGION_OVERRIDE":"us-east-1"}}'
-
-# Publish a real test event to the deployed EventBridge bus
-aws events put-events \
-  --entries '[{"Source":"fraudflow.gold","DetailType":"FraudDetected","EventBusName":"FraudflowBus","Detail":"{\"transaction_id\":\"TXN-001\",\"card_id\":\"CARD-0042\",\"fraud_type\":\"velocity_burst\",\"amount\":127.50,\"merchant_category\":\"online\",\"country\":\"US\",\"timestamp\":\"2024-01-15T14:23:45Z\",\"confidence_score\":0.87}"}]'
-
-# Watch Lambda logs in real time
-aws logs tail /aws/lambda/FraudAlertFunction --follow
-```
-
-> **Common gotcha:** The `Detail` field in `put-events` must be a JSON-encoded *string* (i.e. `json.dumps(dict)`), not a nested JSON object. Passing a nested object is silently accepted but EventBridge rule matching will fail.
 
 ---
 
@@ -199,21 +162,13 @@ FraudFlow/
 ├── monitoring/
 │   ├── prometheus.yml
 │   └── grafana/provisioning/datasources/prometheus.yml
-├── alerting/
-│   ├── template.yaml           # SAM: EventBridge bus + rule + Lambda + IAM
-│   ├── fraud_alert/
-│   │   ├── handler.py          # Lambda entry point
-│   │   └── email_formatter.py  # HTML + plain-text email builder
-│   ├── events/
-│   │   └── test_fraud_event.json
-│   └── requirements.txt
 ├── streaming/                  # PySpark Structured Streaming jobs
 │   ├── spark_utils.py          # SparkSession factory (local + Databricks portable)
 │   ├── Dockerfile
 │   └── jobs/
 │       ├── bronze_ingestion.py # Kafka → Delta (raw, immutable)
 │       ├── silver_cleansing.py # Dedup (watermark) + validation
-│       └── gold_fraud_signals.py # Velocity, z-score, geo signals → EventBridge
+│       └── gold_fraud_signals.py # Velocity, z-score, geo signals → fraud-alerts topic
 └── databricks/                 # Databricks Free Edition notebooks
     ├── 00_setup.py             # Shared paths (auto-detects Unity Catalog)
     ├── 01_data_generator.py    # Replaces Kafka on CE — generates synthetic data
@@ -250,5 +205,5 @@ FraudFlow/
 - [x] Kafka producer — 1k–50k events/min, three fraud patterns, Prometheus metrics
 - [x] PySpark Structured Streaming — bronze/silver/gold Delta medallion (local Docker)
 - [x] Grafana dashboard — events/min, fraud rate, throughput, processing lag
-- [x] AWS alerting — Lambda + EventBridge + SES (code complete; deploy with `sam deploy`)
+- [x] Kafka alerting — high-confidence fraud events published to `fraud-alerts` topic
 - [x] Databricks Free Edition — full pipeline on serverless compute, Unity Catalog volumes

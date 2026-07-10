@@ -3,6 +3,5 @@
 pyspark==3.5.1
 delta-spark==3.1.0
 
-# boto3 for EventBridge publishing from the gold job.
-# Pinned to a minor version range — boto3 releases frequently but rarely breaks.
-boto3>=1.34,<2.0
+# confluent-kafka for publishing fraud alerts to the fraud-alerts topic from the gold job.
+confluent-kafka>=2.4,<3.0

@@ -69,7 +69,7 @@ def wait_for_delta_table(spark: SparkSession, path: str, timeout: int = 180) -> 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# Publish to EventBridge when fraud_score exceeds this threshold.
+# Publish to the fraud-alerts Kafka topic when fraud_score exceeds this threshold.
 # 0.7 means at least two strong signals fired simultaneously — high confidence.
 ALERT_THRESHOLD = 0.70
 
@@ -141,21 +141,21 @@ def compute_fraud_signals(batch_df: DataFrame) -> DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# EventBridge alerting
+# Kafka alerting
 # ---------------------------------------------------------------------------
 
-def publish_alerts(batch_df: DataFrame) -> None:
+def publish_alerts(batch_df: DataFrame, alerts_topic: str, bootstrap_servers: str) -> None:
     """
-    Send high-confidence fraud events to AWS EventBridge.
+    Publish high-confidence fraud events to the fraud-alerts Kafka topic.
 
-    This runs on the Spark DRIVER, not on executors. boto3 clients are not
-    serializable — they cannot be shipped to workers. EventBridge's put_events
-    is a control-plane API, not designed for distributed fan-out anyway.
-    We .collect() only high-score rows (typically <1% of traffic), so the
-    driver-side collect is safe.
+    Runs on the Spark driver — confluent-kafka Producer is not serializable
+    so it cannot run on executors. We .collect() only high-score rows
+    (typically <1% of traffic), so the driver-side collect is safe.
+    Any downstream system (notifications service, compliance dashboard, etc.)
+    subscribes to the topic independently — detection and notification are decoupled.
     """
     try:
-        import boto3
+        from confluent_kafka import Producer
 
         high_confidence = (
             batch_df
@@ -170,50 +170,32 @@ def publish_alerts(batch_df: DataFrame) -> None:
         if not high_confidence:
             return
 
-        client = boto3.client(
-            "events",
-            region_name=os.environ.get("AWS_REGION_OVERRIDE", "us-east-1"),
-        )
-        bus_name = os.environ.get("EVENTBRIDGE_BUS_NAME", "FraudflowBus")
+        producer = Producer({"bootstrap.servers": bootstrap_servers})
 
-        entries = [
-            {
-                "Source": "fraudflow.gold",
-                "DetailType": "FraudDetected",
-                "EventBusName": bus_name,
-                # Detail must be a JSON-encoded STRING, not a nested object.
-                # Passing a dict here is the most common put-events mistake —
-                # EventBridge silently accepts it but rule pattern matching fails.
-                "Detail": json.dumps(
-                    {
-                        "transaction_id": row["transaction_id"],
-                        "card_id": row["card_id"],
-                        "fraud_type": row["fraud_type"] or "unknown",
-                        "amount": float(row["amount"]),
-                        "merchant_category": row["merchant_category"],
-                        "country": row["country"],
-                        "timestamp": row["timestamp"],
-                        "confidence_score": float(row["fraud_score"]),
-                    }
-                ),
-            }
-            for row in high_confidence
-        ]
+        for row in high_confidence:
+            payload = json.dumps({
+                "transaction_id": row["transaction_id"],
+                "card_id": row["card_id"],
+                "fraud_type": row["fraud_type"] or "unknown",
+                "amount": float(row["amount"]),
+                "merchant_category": row["merchant_category"],
+                "country": row["country"],
+                "timestamp": row["timestamp"],
+                "confidence_score": float(row["fraud_score"]),
+            }).encode("utf-8")
 
-        # put_events accepts up to 10 entries per call.
-        for i in range(0, len(entries), 10):
-            resp = client.put_events(Entries=entries[i : i + 10])
-            if resp.get("FailedEntryCount", 0) > 0:
-                logger.warning("EventBridge rejected %d entries", resp["FailedEntryCount"])
+            producer.produce(
+                topic=alerts_topic,
+                key=row["transaction_id"].encode("utf-8"),
+                value=payload,
+            )
 
-        logger.info("Published %d fraud alerts to EventBridge bus '%s'", len(entries), bus_name)
+        producer.flush()
+        logger.info("Published %d fraud alerts to Kafka topic '%s'", len(high_confidence), alerts_topic)
 
-    except ImportError:
-        # boto3 not installed — skip alerting. Useful for pure local runs without AWS creds.
-        pass
     except Exception:
         # Never let alerting failures crash the streaming job.
-        logger.exception("EventBridge publish failed — continuing without alerting")
+        logger.exception("Kafka alert publish failed — continuing without alerting")
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +205,8 @@ def publish_alerts(batch_df: DataFrame) -> None:
 def main() -> None:
     config = load_config()
     spark = build_spark_session("FraudFlow-Gold")
+    alerts_topic = config.alerts_topic
+    bootstrap_servers = config.kafka_bootstrap_servers
 
     logger.info("Gold: reading from silver at %s", config.silver_path)
 
@@ -244,9 +228,9 @@ def main() -> None:
 
         enriched = compute_fraud_signals(batch_df)
 
-        # Publish high-confidence events to EventBridge before writing to Delta,
+        # Publish high-confidence events to Kafka before writing to Delta,
         # so an alert is sent even if the Delta write later fails.
-        publish_alerts(enriched)
+        publish_alerts(enriched, alerts_topic, bootstrap_servers)
 
         # Append to gold Delta table.
         # WHY append (not merge/upsert):

@@ -23,7 +23,7 @@ except Exception:
 #   Databricks Free Edition  →  /Volumes/<catalog>/fraudflow/data  (auto-detected above)
 #   Databricks CE            →  "dbfs:/fraudflow"
 #   Local Docker             →  "/data/fraudflow"
-#   AWS S3                   →  "s3://your-bucket/fraudflow"
+#   S3/EMR                   →  "s3://your-bucket/fraudflow"
 #   Azure ADLS               →  "abfss://container@account.dfs.core.windows.net/fraudflow"
 
 BRONZE_PATH = f"{BASE_PATH}/bronze/transactions"

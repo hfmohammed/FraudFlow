@@ -5,11 +5,6 @@ __pycache__/
 .venv/
 venv/
 
-# SAM / AWS
-.aws-sam/
-# samconfig.toml stores email addresses and account IDs from `sam deploy --guided`
-samconfig.toml
-
 # Local env overrides (keep .env committed, ignore .env.local)
 .env.local
 

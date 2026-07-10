@@ -93,7 +93,7 @@ silver_stream = (
 
 # WHY foreachBatch:
 #   Gives you the full batch DataFrame API inside each micro-batch — multi-step
-#   joins, external API calls (EventBridge), complex scoring logic. The trade-off
+#   joins, external Kafka publish calls, complex scoring logic. The trade-off
 #   is losing Spark's built-in state management for windowed aggregations. For
 #   gold-layer business logic that needs all of the above, foreachBatch is the
 #   standard pattern in production Spark Streaming codebases.

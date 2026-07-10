@@ -4,11 +4,157 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>FraudFlow Technical Writeup</title>
+  <title>FraudFlow — Technical Writeup</title>
   <style>
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
     */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
     span.smallcaps{font-variant: small-caps;}
     div.columns{display: flex; gap: min(4vw, 1.5em);}
     div.column{flex: auto; overflow-x: auto;}
@@ -24,20 +170,19 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
-  <link rel="stylesheet" href="data:text/css,body{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f2f2f2}code{background:#f4f4f4;padding:2px 4px;border-radius:3px}pre{background:#f4f4f4;padding:16px;border-radius:6px;overflow-x:auto}" />
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">FraudFlow Technical Writeup</h1>
+<h1 class="title">FraudFlow — Technical Writeup</h1>
 </header>
 <h1 id="fraudflow-technical-writeup">FraudFlow — Technical Writeup</h1>
 <p><strong>What it is:</strong> A real-time payments fraud detection
 pipeline built from scratch as a data engineering portfolio project.
 Simulated card transactions flow through Kafka into a PySpark Structured
 Streaming medallion architecture (bronze → silver → gold Delta tables),
-with fraud signals computed per card, alerting via AWS Lambda +
-EventBridge + SES, and monitoring via Prometheus + Grafana. The full
-pipeline also runs on Databricks Free Edition.</p>
+with fraud signals computed per card, high-confidence alerts published
+to a Kafka topic for downstream consumers, and monitoring via Prometheus
++ Grafana. The full pipeline also runs on Databricks Free Edition.</p>
 <hr />
 <h2 id="problem-statement">1. Problem Statement</h2>
 <p>Card fraud detection is one of the canonical problems in streaming
@@ -64,10 +209,8 @@ PySpark Structured Streaming
     └── Gold    →  per-card fraud signals + fraud_score
                        │
                        ▼
-              AWS EventBridge (FraudflowBus)
-                       │
-                       ▼
-              Lambda → SES email alert
+              Kafka fraud-alerts topic
+              (score ≥ 0.70, downstream consumers subscribe)
 
 Prometheus ← producer /metrics
 Grafana    ← Prometheus</code></pre>
@@ -280,19 +423,18 @@ correctly bound the state.</p>
 Gold: <code>foreachBatch</code> instead of native streaming
 aggregations</h3>
 <p>The gold layer needs to: (1) compute per-card statistics, (2) join
-those statistics back to individual transactions, and (3) optionally
-call the AWS EventBridge API from the driver. None of this fits the
-native <code>groupBy().agg()</code> streaming model cleanly.</p>
+those statistics back to individual transactions, and (3) publish
+high-confidence alerts to a Kafka topic from the driver. None of this
+fits the native <code>groupBy().agg()</code> streaming model
+cleanly.</p>
 <p><code>foreachBatch</code> gives you the full batch DataFrame API
 inside each micro-batch. The tradeoff: you lose Spark’s built-in state
 management for windowed aggregations across batches. That’s acceptable
 here because fraud scoring is done within each micro-batch (we care
 about velocity within the <em>current</em> batch window, not across all
-time), and the external API call (EventBridge) has to run on the driver
-anyway — Spark workers don’t have AWS credentials.</p>
-<p>EventBridge <code>put_events</code> accepts up to 10 entries per
-call, so alerts are batched in groups of 10 inside
-<code>foreachBatch</code>.</p>
+time), and the Kafka publish runs on the driver where the
+confluent-kafka Producer lives — it is not serializable to
+executors.</p>
 <h3 id="checkpointing">5.4 Checkpointing</h3>
 <p>Every streaming query has a <code>checkpointLocation</code>. The
 checkpoint stores two things: the committed Kafka offsets (so the job
@@ -312,60 +454,16 @@ Delta table doesn’t exist yet and Spark throws
 for up to 180 seconds. The same fix was applied to gold waiting for
 silver.</p>
 <hr />
-<h2 id="aws-alerting-design-decisions">6. AWS Alerting Design
+<h2 id="databricks-portability-decisions">6. Databricks Portability
 Decisions</h2>
-<h3 id="custom-eventbridge-bus">6.1 Custom EventBridge bus</h3>
-<p>A custom bus (<code>FraudflowBus</code>) was created rather than
-using the default bus for two reasons:</p>
-<ol type="1">
-<li><strong>Isolation.</strong> Events from other AWS services
-(CodePipeline, EC2, etc.) flow through the default bus. Using the
-default bus means your fraud rules might accidentally match unrelated
-events.</li>
-<li><strong>SAM shorthand limitation.</strong> SAM’s
-<code>Events:</code> shorthand in a
-<code>AWS::Serverless::Function</code> only works with the default bus.
-Custom bus wiring requires explicit <code>AWS::Events::Rule</code> +
-<code>AWS::Lambda::Permission</code> resources, which is more code but
-also more transparent about what’s happening.</li>
-</ol>
-<h3 id="aws_region_override-not-aws_region">6.2
-<code>AWS_REGION_OVERRIDE</code> not <code>AWS_REGION</code></h3>
-<p><code>AWS_REGION</code> is a reserved environment variable in the
-Lambda runtime — CloudFormation will reject the template if you try to
-set it. The Lambda handler reads <code>AWS_REGION_OVERRIDE</code> and
-falls back to <code>boto3</code>’s default region resolution (which
-picks up the Lambda execution region automatically anyway).</p>
-<h3 id="fraudalertfunctionpermission">6.3
-<code>FraudAlertFunctionPermission</code></h3>
-<p>Without an explicit <code>AWS::Lambda::Permission</code> granting
-<code>events.amazonaws.com</code> the right to invoke the Lambda,
-EventBridge silently accepts the <code>put-events</code> call, matches
-the rule, and then drops the event without invoking Lambda. No error is
-returned. This was the most counterintuitive pitfall in the AWS setup —
-always add the permission resource, always scope it to the specific rule
-ARN via <code>SourceArn</code>.</p>
-<h3 id="detail-must-be-a-json-encoded-string">6.4 <code>Detail</code>
-must be a JSON-encoded string</h3>
-<p>The EventBridge <code>put-events</code> API accepts
-<code>Detail</code> as a string. If you pass a Python dict directly
-(which <code>boto3</code> serializes to JSON), it works. But if you pass
-a nested object by accident (e.g. a dict that contains another dict
-already serialized as a string), rule matching silently fails. The
-convention enforced throughout is
-<code>"Detail": json.dumps(detail_dict)</code> — always an explicit
-<code>json.dumps</code>, never assumed.</p>
-<hr />
-<h2 id="databricks-portability-decisions">7. Databricks Portability
-Decisions</h2>
-<h3 id="delta_base_path-as-the-single-portability-lever">7.1
+<h3 id="delta_base_path-as-the-single-portability-lever">6.1
 <code>DELTA_BASE_PATH</code> as the single portability lever</h3>
 <p>All path construction flows through <code>BASE_PATH</code> in
 <code>00_setup.py</code>. This means moving the pipeline from local
 Docker to Databricks to S3 to Azure ADLS requires changing exactly one
 value. The design was intentional from the start — every path is a
 derivation of <code>BASE_PATH</code>, never hardcoded.</p>
-<h3 id="triggeravailablenowtrue-on-databricks">7.2
+<h3 id="triggeravailablenowtrue-on-databricks">6.2
 <code>trigger(availableNow=True)</code> on Databricks</h3>
 <p>Local Docker jobs run with
 <code>trigger(processingTime="10 seconds")</code> and loop forever. On
@@ -374,7 +472,7 @@ cell that runs forever blocks the notebook and eventually times out.
 <code>availableNow=True</code> processes all data currently in the
 source table and then stops cleanly. The cell finishes, the results are
 visible, and you can re-run to pick up new data.</p>
-<h3 id="unity-catalog-auto-detection">7.3 Unity Catalog
+<h3 id="unity-catalog-auto-detection">6.3 Unity Catalog
 auto-detection</h3>
 <p>Databricks Free Edition enforces Unity Catalog — raw
 <code>dbfs:/</code> paths are blocked. The fix in
@@ -384,19 +482,19 @@ auto-detection</h3>
 exist, and constructs
 <code>BASE_PATH = /Volumes/&lt;catalog&gt;/fraudflow/data</code>. The
 DBFS fallback is retained for Community Edition users.</p>
-<h3 id="self-contained-data-generator-on-databricks">7.4 Self-contained
+<h3 id="self-contained-data-generator-on-databricks">6.4 Self-contained
 data generator on Databricks</h3>
 <p>Databricks Free Edition clusters sit behind NAT — they cannot reach a
 Kafka broker running on your laptop. Rather than requiring a cloud Kafka
-cluster (Confluent Cloud, MSK), <code>01_data_generator.py</code>
-contains a self-contained copy of the core producer logic (minus the
-Kafka send) and writes directly to the bronze Delta table. The fraud
-patterns and card/merchant simulation are identical to the local
-producer. This keeps the Databricks setup dependency-free.</p>
+cluster, <code>01_data_generator.py</code> contains a self-contained
+copy of the core producer logic (minus the Kafka send) and writes
+directly to the bronze Delta table. The fraud patterns and card/merchant
+simulation are identical to the local producer. This keeps the
+Databricks setup dependency-free.</p>
 <hr />
-<h2 id="key-challenges-and-solutions">8. Key Challenges and
+<h2 id="key-challenges-and-solutions">7. Key Challenges and
 Solutions</h2>
-<h3 id="bitnamikafka3.7-tag-did-not-exist">8.1
+<h3 id="bitnamikafka3.7-tag-did-not-exist">7.1
 <code>bitnami/kafka:3.7</code> tag did not exist</h3>
 <p>Bitnami does not publish floating minor-version tags
 (<code>3.7</code>) — only full version tags (<code>3.7.0</code>). Worse,
@@ -407,7 +505,7 @@ unprefixed <code>KAFKA_*</code> naming. Switching to
 generating a <code>CLUSTER_ID</code> with
 <code>kafka-storage.sh random-uuid</code>, and updating the volume path
 and health check command.</p>
-<h3 id="silver-delta_schema_not_set-on-startup">8.2 Silver
+<h3 id="silver-delta_schema_not_set-on-startup">7.2 Silver
 <code>DELTA_SCHEMA_NOT_SET</code> on startup</h3>
 <p>Silver’s <code>readStream</code> from the bronze Delta table failed
 when silver started before bronze had written its first micro-batch (the
@@ -416,7 +514,7 @@ table didn’t exist yet). Fixed with a
 that in Docker Compose, all three Spark containers start roughly
 simultaneously — <code>restart: on-failure</code> was also added so the
 container retries if it loses the race.</p>
-<h3 id="gold-java_gateway_exited-out-of-memory">8.3 Gold
+<h3 id="gold-java_gateway_exited-out-of-memory">7.3 Gold
 <code>JAVA_GATEWAY_EXITED</code> (out of memory)</h3>
 <p>Three simultaneous PySpark JVMs each configured with
 <code>spark.driver.memory=2g</code> exceeded available RAM (6GB total,
@@ -424,7 +522,7 @@ leaving nothing for the OS and Docker overhead). Reduced to
 <code>1g</code> per job. The fix was in <code>spark_utils.py</code> (one
 place) because all three jobs use the same
 <code>build_spark_session()</code> factory.</p>
-<h3 id="grafana-no-data-on-all-panels">8.4 Grafana “No data” on all
+<h3 id="grafana-no-data-on-all-panels">7.4 Grafana “No data” on all
 panels</h3>
 <p>The pre-provisioned Grafana dashboard JSON referenced datasource UID
 <code>"prometheus"</code>, but Grafana auto-generated a random UID
@@ -433,7 +531,7 @@ by adding <code>uid: prometheus</code> to the datasource provisioning
 YAML. Verified by calling the Grafana API
 (<code>GET /api/datasources</code>) to inspect the actual UID before and
 after the fix.</p>
-<h3 id="databricks-free-edition-dbfs-restriction">8.5 Databricks Free
+<h3 id="databricks-free-edition-dbfs-restriction">7.5 Databricks Free
 Edition DBFS restriction</h3>
 <p><code>dbfs:/fraudflow</code> paths are blocked on Free Edition (Unity
 Catalog enforcement). Fixed by auto-detecting the Unity Catalog catalog
@@ -443,7 +541,7 @@ path. The <code>DESCRIBE HISTORY %sql</code> cell in
 with a <code>%python</code> cell using an f-string so it picks up the
 dynamic <code>GOLD_PATH</code>.</p>
 <hr />
-<h2 id="results">9. Results</h2>
+<h2 id="results">8. Results</h2>
 <p>Pipeline validated end-to-end on Databricks Free Edition (50,000
 synthetic transactions):</p>
 <table>
@@ -520,8 +618,8 @@ the 1.5% target</li>
 (default) through 50,000 events/min (configured max). Prometheus and
 Grafana dashboard confirmed live metrics at all throughput levels.</p>
 <hr />
-<h2 id="what-i-would-do-differently-at-production-scale">10. What I
-Would Do Differently at Production Scale</h2>
+<h2 id="what-i-would-do-differently-at-production-scale">9. What I Would
+Do Differently at Production Scale</h2>
 <ol type="1">
 <li><p><strong>Avro + Schema Registry.</strong> JSON is convenient for
 development but schema drift is a real risk in production. Confluent
@@ -540,13 +638,11 @@ layer is where the model inference step would go.</p></li>
 validation in silver are silently dropped. A production system would
 route them to a DLQ (another Kafka topic or S3 prefix) for
 investigation.</p></li>
-<li><p><strong>Idempotent Lambda.</strong> The current Lambda sends one
-email per EventBridge event. At high fraud rates this could generate
-hundreds of emails per minute. Rate limiting (DynamoDB TTL-based dedup)
-or alert aggregation (SNS + digest Lambda) would be needed.</p></li>
-<li><p><strong>Terraform over SAM.</strong> SAM is convenient for
-Lambda-only stacks but Terraform would be more appropriate if the
-alerting infrastructure grew to include additional services.</p></li>
+<li><p><strong>Alert deduplication.</strong> The current gold job
+publishes one alert per high-scoring transaction. At high fraud rates a
+single card could generate dozens of alerts per minute. A TTL-based
+dedup layer (tracking recently-alerted card IDs) would suppress
+redundant alerts.</p></li>
 </ol>
 </body>
 </html>
