@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze Layer : Synthetic Data Generator
+# MAGIC # Bronze Layer Synthetic Data Generator
 # MAGIC
 # MAGIC **Why this notebook exists:**
 # MAGIC Databricks Community Edition clusters cannot reach your local Kafka broker

@@ -1,5 +1,5 @@
 """
-Gold layer : Silver Delta → Fraud Signals Delta
+Gold layer: Silver Delta → Fraud Signals Delta
 
 Gold computes per-transaction fraud signals and a composite fraud score.
 It uses foreachBatch, which turns each micro-batch into a regular Spark DataFrame.
@@ -9,19 +9,19 @@ WHY foreachBatch instead of a native streaming aggregation:
   you can only use "update" or "complete" output modes, and complex multi-step
   logic (e.g. computing a score from multiple signals then calling an external API)
   doesn't fit cleanly into a single operator. foreachBatch gives you the full
-  batch DataFrame API inside each micro-batch : joins, multi-step transforms,
-  external calls : at the cost of losing Spark's built-in state management.
+  batch DataFrame API inside each micro-batch: joins, multi-step transforms,
+  external calls, at the cost of losing Spark's built-in state management.
   For gold-layer business logic that needs all of the above, foreachBatch is
   the standard pattern you'll see in every production Spark Streaming codebase.
 
 Signals computed per transaction:
-  velocity_60m    : transactions from this card in the current micro-batch
-                    (proxy for sustained high frequency across the window)
-  avg_amount_60m  : mean amount for this card in the micro-batch window
-  amount_zscore   : standard deviations from the card's batch mean (batch-relative)
-  geo_anomaly     : True if fraud_type == "impossible_travel" (producer-labeled)
-  fraud_score     : weighted composite in [0, 1]
-                    velocity (40%) + amount spike (40%) + geo anomaly (20%)
+  velocity_60m    transactions from this card in the current micro-batch
+                  (proxy for sustained high frequency across the window)
+  avg_amount_60m  mean amount for this card in the micro-batch window
+  amount_zscore   standard deviations from the card's batch mean (batch-relative)
+  geo_anomaly     True if fraud_type == "impossible_travel" (producer-labeled)
+  fraud_score     weighted composite in [0, 1]
+                  velocity (40%) + amount spike (40%) + geo anomaly (20%)
 """
 
 import json
@@ -115,11 +115,11 @@ def publish_alerts(batch_df: DataFrame, alerts_topic: str, bootstrap_servers: st
     """
     Publish high-confidence fraud events to the fraud-alerts Kafka topic.
 
-    Runs on the Spark driver : confluent-kafka Producer is not serializable
+    Runs on the Spark driver; the confluent-kafka Producer is not serializable
     so it cannot run on executors. We .collect() only high-score rows
     (typically <1% of traffic), so the driver-side collect is safe.
     Any downstream system (notifications service, compliance dashboard, etc.)
-    subscribes to the topic independently : detection and notification are decoupled.
+    subscribes to the topic independently; detection and notification are decoupled.
     """
     try:
         from confluent_kafka import Producer
@@ -161,7 +161,7 @@ def publish_alerts(batch_df: DataFrame, alerts_topic: str, bootstrap_servers: st
         logger.info("Published %d fraud alerts to Kafka topic '%s'", len(high_confidence), alerts_topic)
 
     except Exception:
-        logger.exception("Kafka alert publish failed : continuing without alerting")
+        logger.exception("Kafka alert publish failed, continuing without alerting")
 
 
 def main() -> None:

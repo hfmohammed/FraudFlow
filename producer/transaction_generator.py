@@ -139,7 +139,7 @@ class TransactionGenerator:
     def generate_transaction(self, card_id: str, fraud_decision) -> dict:
         """
         Build one transaction dict. `fraud_decision` is a FraudDecision namedtuple
-        from FraudInjector : it carries the pattern instance (or None for legitimate).
+        from FraudInjector; it carries the pattern instance (or None for legitimate).
         """
         card = self.card_profiles[card_id]
         now = datetime.now(tz=timezone.utc)

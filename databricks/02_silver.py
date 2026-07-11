@@ -1,13 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Silver Layer : Dedup + Validation
+# MAGIC # Silver Layer Dedup + Validation
 # MAGIC
 # MAGIC Reads the bronze Delta table, deduplicates by `transaction_id`, validates
 # MAGIC required fields, and writes clean rows to the silver Delta table.
 # MAGIC
 # MAGIC **Key difference from local Docker:**
 # MAGIC `trigger(availableNow=True)` replaces `trigger(processingTime="15 seconds")`.
-# MAGIC `availableNow` processes all data currently in the source table, then stops :
+# MAGIC `availableNow` processes all data currently in the source table, then stops,
 # MAGIC perfect for running in a notebook cell. On local Docker the job runs forever.
 # MAGIC
 # MAGIC **Run order:** `00_setup` → `01_data_generator` → **`02_silver`** → `03_gold` → `04_explore`

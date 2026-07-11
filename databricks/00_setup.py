@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # FraudFlow : Setup & Paths
+# MAGIC # FraudFlow Setup & Paths
 # MAGIC
 # MAGIC Run this cell first in every notebook via `%run ./00_setup`.
 # MAGIC It sets the Delta table paths and validates the cluster environment.

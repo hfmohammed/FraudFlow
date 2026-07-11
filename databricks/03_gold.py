@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Gold Layer : Fraud Signals
+# MAGIC # Gold Layer Fraud Signals
 # MAGIC
 # MAGIC Reads silver, computes per-card fraud signals using `foreachBatch`, and
 # MAGIC writes enriched rows to the gold Delta table.

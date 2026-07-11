@@ -18,7 +18,7 @@
 | Databricks Runtime | **14.3 LTS** (Spark 3.5, Delta 3.1, Python 3.11) |
 | Node type | default (CE assigns it) |
 
-> Runtime 14.3 LTS ships with Delta Lake pre-installed : no pip installs needed
+> Runtime 14.3 LTS ships with Delta Lake pre-installed, no pip installs needed
 > for Spark or Delta. The notebooks are self-contained.
 
 ---
@@ -74,14 +74,14 @@ You should see Delta files (`part-*.parquet`) and a `_delta_log/` directory.
 
 | Aspect | Local Docker | Databricks CE |
 |---|---|---|
-| Kafka source | `spark.readStream.format("kafka")` | Not available : replaced by `01_data_generator.py` |
+| Kafka source | `spark.readStream.format("kafka")` | Not available, replaced by `01_data_generator.py` |
 | Trigger | `processingTime="10 seconds"` | `availableNow=True` (run once, finish) |
 | SparkSession | `SparkSession.builder...getOrCreate()` | `spark` is pre-injected globally |
 | Delta setup | `configure_spark_with_delta_pip` | Pre-installed in runtime |
 | Storage path | `/data/fraudflow` (Docker volume) | `dbfs:/fraudflow` |
 | Continuous streaming | Containers run forever | Re-run cells or schedule with Databricks Jobs |
 
-The silver and gold **logic is identical** : only the trigger and session setup differ.
+The silver and gold **logic is identical**. Only the trigger and session setup differ.
 
 ---
 

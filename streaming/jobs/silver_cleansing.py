@@ -1,16 +1,16 @@
 """
-Silver layer : Bronze Delta → Silver Delta
+Silver layer: Bronze Delta → Silver Delta
 
 Silver is the "trusted" layer: deduplicated, validated, properly typed.
 Downstream analytics, ML feature engineering, and the gold aggregation job
-all read from silver : never from bronze.
+all read from silver, never from bronze.
 
 Reading from bronze (not Kafka) is the medallion architecture principle:
 each layer only reads from the one below it. This means:
   - Silver can be rebuilt from scratch by replaying bronze, even after Kafka
     messages expire (Kafka retention is typically 7 days; bronze is forever).
   - The Kafka topic's retention policy is decoupled from silver's correctness.
-  - If silver has a schema bug, you fix it and re-read bronze : no Kafka re-play needed.
+  - If silver has a schema bug, you fix it and re-read bronze; no Kafka re-play needed.
 """
 
 import logging
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 def wait_for_delta_table(spark: SparkSession, path: str, timeout: int = 180) -> None:
     """
     Block until the upstream Delta table exists and has at least one committed write.
-    Silver and gold must wait for their source tables : trying to readStream from a
+    Silver and gold must wait for their source tables: trying to readStream from a
     path that has no Delta log yet raises DELTA_SCHEMA_NOT_SET immediately.
     Works for local paths, dbfs:/, s3://, and abfss:// without code changes.
     """

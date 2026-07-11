@@ -1,5 +1,5 @@
 """
-Bronze layer : Kafka → Delta Lake
+Bronze layer: Kafka → Delta Lake
 
 The bronze table is a raw, immutable copy of every Kafka message.
 No transformations happen here beyond JSON parsing. The principle: if silver or

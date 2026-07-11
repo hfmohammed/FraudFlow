@@ -4,7 +4,7 @@ FraudFlow transaction producer.
 Generates simulated card transactions and publishes them to a Kafka topic.
 Uses confluent-kafka (backed by librdkafka in C) rather than kafka-python because
 librdkafka handles batching and network I/O in C threads that run outside Python's
-GIL : essential for sustaining 10k–50k events/minute without GIL contention.
+GIL, which is essential for sustaining 10k–50k events/minute without GIL contention.
 
 NOTE on serialization: events are JSON-encoded strings, not Avro/Protobuf.
 JSON requires no schema registry, is human-readable, and Spark can parse it with
@@ -69,7 +69,7 @@ def _build_producer(bootstrap_servers: str) -> Producer:
         except KafkaException as exc:
             wait = 2 ** attempt
             logger.warning(
-                "Kafka not ready (attempt %d/3): %s : retrying in %ds", attempt, exc, wait
+                "Kafka not ready (attempt %d/3): %s, retrying in %ds", attempt, exc, wait
             )
             time.sleep(wait)
     raise RuntimeError(f"Could not connect to Kafka at {bootstrap_servers} after 3 attempts")
@@ -100,7 +100,7 @@ def run() -> None:
 
     def _handle_sigterm(signum, frame):
         nonlocal running
-        logger.info("SIGTERM received : draining producer queue...")
+        logger.info("SIGTERM received, draining producer queue...")
         running = False
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -127,7 +127,7 @@ def run() -> None:
             producer.poll(0)
         except BufferError:
             kafka_errors_counter.inc()
-            logger.warning("Producer queue full : Kafka is slow. Backing off 1s.")
+            logger.warning("Producer queue full. Kafka is slow. Backing off 1s.")
             producer.poll(1)
 
         fraud_label = "true" if txn["is_fraud"] else "false"
