@@ -12,9 +12,9 @@ ENV SPARK_LOCAL_IP=127.0.0.1
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY streaming/requirements.txt streaming/requirements.txt
+RUN pip install --no-cache-dir -r streaming/requirements.txt
 
-COPY . .
+COPY streaming/ streaming/
 
-CMD ["python", "jobs/bronze_ingestion.py"]
+CMD ["python", "-m", "streaming.jobs.bronze_ingestion"]

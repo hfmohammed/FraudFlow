@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from transaction_generator import CardProfile
+
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
@@ -178,7 +180,7 @@ class FraudInjector:
             ImpossibleTravelPattern(),
         ]
 
-    def decide(self, card) -> FraudDecision:
+    def decide(self, card: CardProfile) -> FraudDecision:
         self._total_count += 1
         now = datetime.now(tz=timezone.utc)
 

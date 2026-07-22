@@ -104,7 +104,8 @@ services:
   spark-bronze:
     profiles: ["streaming"]
     build:
-      context: ./streaming
+      context: .
+      dockerfile: streaming/Dockerfile
     container_name: fraudflow-spark-bronze
     restart: on-failure
     networks:
@@ -123,10 +124,11 @@ services:
   spark-silver:
     profiles: ["streaming"]
     build:
-      context: ./streaming
+      context: .
+      dockerfile: streaming/Dockerfile
     container_name: fraudflow-spark-silver
     restart: on-failure
-    command: ["python", "jobs/silver_cleansing.py"]
+    command: ["python", "-m", "streaming.jobs.silver_cleansing"]
     networks:
       - fraudflow
     environment:
@@ -140,10 +142,11 @@ services:
   spark-gold:
     profiles: ["streaming"]
     build:
-      context: ./streaming
+      context: .
+      dockerfile: streaming/Dockerfile
     container_name: fraudflow-spark-gold
     restart: on-failure
-    command: ["python", "jobs/gold_fraud_signals.py"]
+    command: ["python", "-m", "streaming.jobs.gold_fraud_signals"]
     networks:
       - fraudflow
     environment:

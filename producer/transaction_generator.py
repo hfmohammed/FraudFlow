@@ -32,8 +32,14 @@ HOME_COUNTRY_WEIGHTS = {
     "MX": 0.005,
 }
 
-MERCHANT_CATEGORIES = ["grocery", "gas", "restaurant", "retail", "travel", "online"]
-CATEGORY_WEIGHTS = [0.22, 0.15, 0.23, 0.20, 0.08, 0.12]
+MERCHANT_CATEGORY_WEIGHTS = {
+    "grocery": 0.22,
+    "gas": 0.15,
+    "restaurant": 0.23,
+    "retail": 0.20,
+    "travel": 0.08,
+    "online": 0.12
+}
 
 
 @dataclass
@@ -65,9 +71,9 @@ def _jitter(val: float, amount: float = 0.05) -> float:
     return val + random.uniform(-amount, amount)
 
 
-def _pick_country() -> str:
-    countries = list(HOME_COUNTRY_WEIGHTS.keys())
-    weights = list(HOME_COUNTRY_WEIGHTS.values())
+def _pick_key(key_weight: dict[str, float]) -> str:
+    countries = list(key_weight.keys())
+    weights = list(key_weight.values())
     return random.choices(countries, weights=weights, k=1)[0]
 
 
@@ -76,18 +82,26 @@ def _city_for_country(country: str) -> tuple[float, float]:
     return random.choice(cities)
 
 
+def _validate_key_weights(key_weight: dict[str, float]) -> None:
+    assert (sum(key_weight.values()) == 1, "Key weights must sum to 1.0")
+
+
 class TransactionGenerator:
     def __init__(self, config: Config) -> None:
+        _validate_key_weights(MERCHANT_CATEGORY_WEIGHTS)
+        _validate_key_weights(HOME_COUNTRY_WEIGHTS)
+
         self._config = config
         self.card_profiles: dict[str, CardProfile] = {}
         self.merchant_pool: list[MerchantRecord] = []
-        self._init_merchants()
-        self._init_cards()
 
-    def _init_merchants(self) -> None:
+        # generate card profiles and merchant pool
+        self._generate_cards()
+        self._generate_merchants()
+
+    def _generate_merchants(self) -> None:
         for i in range(self._config.num_merchants):
-            category = random.choices(MERCHANT_CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
-
+            category = _pick_key(MERCHANT_CATEGORY_WEIGHTS)
             if category == "online":
                 self.merchant_pool.append(
                     MerchantRecord(
@@ -99,7 +113,7 @@ class TransactionGenerator:
                     )
                 )
             else:
-                country = _pick_country()
+                country = _pick_key(HOME_COUNTRY_WEIGHTS)
                 base_lat, base_lon = _city_for_country(country)
                 self.merchant_pool.append(
                     MerchantRecord(
@@ -111,9 +125,9 @@ class TransactionGenerator:
                     )
                 )
 
-    def _init_cards(self) -> None:
+    def _generate_cards(self) -> None:
         for i in range(self._config.num_cards):
-            country = _pick_country()
+            country = _pick_key(HOME_COUNTRY_WEIGHTS)
             base_lat, base_lon = _city_for_country(country)
 
             low = max(5.0, random.gauss(15, 8))
@@ -152,9 +166,11 @@ class TransactionGenerator:
         if fraud_decision.pattern is not None:
             txn = fraud_decision.pattern.apply(card, self.merchant_pool, now)
         else:
-            merchant = random.choice(self.merchants_near_country(card.home_country))
+            merchant = random.choice(
+                self.merchants_near_country(card.home_country))
             amount = round(
-                random.uniform(card.typical_spend_low, card.typical_spend_high), 2
+                random.uniform(card.typical_spend_low,
+                               card.typical_spend_high), 2
             )
             txn = {
                 "amount": amount,

@@ -14,41 +14,14 @@ each layer only reads from the one below it. This means:
 """
 
 import logging
-import os
-import sys
-import time
 
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_timestamp
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import load_config
-from spark_utils import build_spark_session
+from streaming.config import load_config
+from streaming.spark_utils import build_spark_session, wait_for_delta_table
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def wait_for_delta_table(spark: SparkSession, path: str, timeout: int = 180) -> None:
-    """
-    Block until the upstream Delta table exists and has at least one committed write.
-    Silver and gold must wait for their source tables: trying to readStream from a
-    path that has no Delta log yet raises DELTA_SCHEMA_NOT_SET immediately.
-    Works for local paths, dbfs:/, s3://, and abfss:// without code changes.
-    """
-    from delta.tables import DeltaTable
-
-    start = time.monotonic()
-    while time.monotonic() - start < timeout:
-        try:
-            if DeltaTable.isDeltaTable(spark, path):
-                logger.info("Upstream Delta table ready at %s", path)
-                return
-        except Exception:
-            pass
-        logger.info("Waiting for upstream Delta table at %s (bronze not ready yet)...", path)
-        time.sleep(10)
-    raise TimeoutError(f"Delta table at {path} did not appear within {timeout}s")
 
 
 def main() -> None:

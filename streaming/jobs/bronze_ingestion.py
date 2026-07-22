@@ -8,8 +8,6 @@ gold have a bug, you can reprocess from bronze without re-reading Kafka
 """
 
 import logging
-import os
-import sys
 
 from pyspark.sql.functions import col, current_timestamp, from_json
 from pyspark.sql.types import (
@@ -20,9 +18,8 @@ from pyspark.sql.types import (
     StructType,
 )
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import load_config
-from spark_utils import build_spark_session
+from streaming.config import StreamingConfig, load_config
+from streaming.spark_utils import build_spark_session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,7 +42,7 @@ TRANSACTION_SCHEMA = StructType(
 
 
 def main() -> None:
-    config = load_config()
+    config: StreamingConfig = load_config()
     spark = build_spark_session("FraudFlow-Bronze", include_kafka=True)
 
     logger.info("Bronze: reading from Kafka topic '%s' at %s",

@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 from pyspark.sql import SparkSession
 
@@ -48,3 +49,25 @@ def build_spark_session(app_name: str, include_kafka: bool = False) -> SparkSess
     spark.sparkContext.setLogLevel("WARN")
     logger.info("SparkSession '%s' ready (Databricks=%s)", app_name, is_databricks)
     return spark
+
+
+def wait_for_delta_table(spark: SparkSession, path: str, timeout: int = 180) -> None:
+    """
+    Block until the upstream Delta table exists and has at least one committed write.
+    Silver and gold must wait for their source tables: trying to readStream from a
+    path that has no Delta log yet raises DELTA_SCHEMA_NOT_SET immediately.
+    Works for local paths, dbfs:/, s3://, and abfss:// without code changes.
+    """
+    from delta.tables import DeltaTable
+
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        try:
+            if DeltaTable.isDeltaTable(spark, path):
+                logger.info("Upstream Delta table ready at %s", path)
+                return
+        except Exception:
+            pass
+        logger.info("Waiting for upstream Delta table at %s...", path)
+        time.sleep(10)
+    raise TimeoutError(f"Delta table at {path} did not appear within {timeout}s")

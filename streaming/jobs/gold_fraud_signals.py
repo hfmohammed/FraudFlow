@@ -26,11 +26,8 @@ Signals computed per transaction:
 
 import json
 import logging
-import os
-import sys
-import time
 
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
     abs as spark_abs,
     avg,
@@ -45,26 +42,8 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import DoubleType
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import load_config, StreamingConfig
-from spark_utils import build_spark_session
-
-
-def wait_for_delta_table(spark: SparkSession, path: str, timeout: int = 180) -> None:
-    """Block until the upstream Delta table has at least one committed write."""
-    from delta.tables import DeltaTable
-
-    start = time.monotonic()
-    while time.monotonic() - start < timeout:
-        try:
-            if DeltaTable.isDeltaTable(spark, path):
-                logger.info("Upstream Delta table ready at %s", path)
-                return
-        except Exception:
-            pass
-        logger.info("Waiting for upstream Delta table at %s (silver not ready yet)...", path)
-        time.sleep(10)
-    raise TimeoutError(f"Delta table at {path} did not appear within {timeout}s")
+from streaming.config import load_config, StreamingConfig
+from streaming.spark_utils import build_spark_session, wait_for_delta_table
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -134,6 +113,7 @@ def publish_alerts(batch_df: DataFrame, alerts_topic: str, bootstrap_servers: st
             .collect()
         )
 
+
         if not high_confidence:
             return
 
@@ -192,12 +172,7 @@ def main() -> None:
 
         publish_alerts(enriched, alerts_topic, bootstrap_servers)
 
-        (
-            enriched.write
-            .format("delta")
-            .mode("append")
-            .save(config.gold_path)
-        )
+        enriched.write.format("delta").mode("append").save(config.gold_path)
 
         fraud_count = enriched.filter(col("fraud_score") >= ALERT_THRESHOLD).count()
         logger.info(
