@@ -88,7 +88,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(producer_events_total{fraud=\"true\"}[2m]) / rate(producer_events_total[2m]) * 100",
+          "expr": "sum(rate(producer_events_total{fraud=\"true\"}[2m])) / sum(rate(producer_events_total[2m])) * 100",
           "legendFormat": "fraud %",
           "refId": "A"
         }
@@ -300,7 +300,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(producer_events_total{fraud=\"true\"}[2m]) / rate(producer_events_total[2m]) * 100",
+          "expr": "sum(rate(producer_events_total{fraud=\"true\"}[2m])) / sum(rate(producer_events_total[2m])) * 100",
           "legendFormat": "fraud rate %",
           "refId": "A"
         }
