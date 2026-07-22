@@ -5,8 +5,8 @@ __pycache__/
 .venv/
 venv/
 
-# Local env overrides (keep .env committed, ignore .env.local)
-.env.local
+# Local env (contains credentials, do not commit)
+.env
 
 # Spark / Delta Lake (Phase 2)
 checkpoints/
@@ -21,3 +21,6 @@ delta/
 
 # macOS
 .DS_Store
+
+# Internal notes (not for public repo)
+.assets_cache/
