@@ -128,8 +128,8 @@ The producer injects three fraud patterns at the configured `FRAUD_RATE` (~1.5% 
 
 | Pattern | `fraud_type` | Signal |
 |---|---|---|
-| Amount spike | `amount_spike` | A card that normally spends $10–$80 submits a $500–$3000 transaction |
-| Velocity burst | `velocity_burst` | Same card fires 8–15 transactions in a 60-second window |
+| Amount spike | `amount_spike` | A card that normally spends $10-$80 submits a $500-$3000 transaction |
+| Velocity burst | `velocity_burst` | Same card fires 8-15 transactions in a 60-second window |
 | Impossible travel | `impossible_travel` | Same card used >2,000 km apart within 5 minutes |
 
 Each event carries `is_fraud: true/false` and `fraud_type: <string or null>` as ground-truth labels for downstream ML.
@@ -196,13 +196,13 @@ FraudFlow/
 
 **Fraud by country** (Top 3 by rate): CA 2.59% · GB 2.49% · FR 2.45% · DE 2.43%
 
-**Local Docker producer** (configurable via `.env`): tested at 1k–50k events/min
+**Local Docker producer** (configurable via `.env`): tested at 1k-50k events/min
 
 ---
 
 ## Roadmap
 
-- [x] Kafka producer: 1k–50k events/min, three fraud patterns, Prometheus metrics
+- [x] Kafka producer: 1k-50k events/min, three fraud patterns, Prometheus metrics
 - [x] PySpark Structured Streaming: bronze/silver/gold Delta medallion (local Docker)
 - [x] Grafana dashboard: events/min, fraud rate, throughput, processing lag
 - [x] Kafka alerting: high-confidence fraud events published to `fraud-alerts` topic

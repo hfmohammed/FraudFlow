@@ -26,8 +26,8 @@
 # MAGIC
 # MAGIC Self-contained copy of the core producer logic (minus the Kafka send).
 # MAGIC The three fraud patterns are identical to the local producer:
-# MAGIC - **amount_spike**: $500–$3000 on a card that normally spends $10–$80
-# MAGIC - **velocity_burst**: 8–15 transactions from the same card in 60 seconds
+# MAGIC - **amount_spike**: $500-$3000 on a card that normally spends $10-$80
+# MAGIC - **velocity_burst**: 8-15 transactions from the same card in 60 seconds
 # MAGIC - **impossible_travel**: same card used >2,000 km apart within 5 minutes
 
 # COMMAND ----------

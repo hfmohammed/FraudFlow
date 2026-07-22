@@ -38,7 +38,7 @@ _FAR_CITIES: list[tuple[str, float, float]] = [
 
 class AmountSpikePattern:
     """
-    A card that normally spends $10–$80 suddenly submits a $500–$3000 transaction.
+    A card that normally spends $10-$80 suddenly submits a $500-$3000 transaction.
     Stateless: no per-card memory is needed because each spike is a one-off event.
     The fraud is in the amount; location and merchant remain plausible.
     """
@@ -64,8 +64,8 @@ class AmountSpikePattern:
 
 class VelocityBurstPattern:
     """
-    The same card fires 8–15 transactions within a 60-second window.
-    Normal cards average 1–3 transactions per hour.
+    The same card fires 8-15 transactions within a 60-second window.
+    Normal cards average 1-3 transactions per hour.
     The fraud is in the *frequency*, not the transaction content: each individual
     transaction looks legitimate. This mimics a compromised card being used by a
     bot before the issuer can freeze it.

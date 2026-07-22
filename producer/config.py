@@ -25,7 +25,7 @@ def load_config() -> Config:
         raise ValueError(f"FRAUD_RATE must be between 0.0 and 0.5, got {fraud_rate}")
 
     if events_per_minute < 1 or events_per_minute > 50_000:
-        raise ValueError(f"EVENTS_PER_MINUTE must be 1–50000, got {events_per_minute}")
+        raise ValueError(f"EVENTS_PER_MINUTE must be 1-50000, got {events_per_minute}")
 
     if events_per_minute > 10_000:
         logger.warning(

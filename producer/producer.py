@@ -4,7 +4,7 @@ FraudFlow transaction producer.
 Generates simulated card transactions and publishes them to a Kafka topic.
 Uses confluent-kafka (backed by librdkafka in C) rather than kafka-python because
 librdkafka handles batching and network I/O in C threads that run outside Python's
-GIL, which is essential for sustaining 10k–50k events/minute without GIL contention.
+GIL, which is essential for sustaining 10k-50k events/minute without GIL contention.
 
 NOTE on serialization: events are JSON-encoded strings, not Avro/Protobuf.
 JSON requires no schema registry, is human-readable, and Spark can parse it with
